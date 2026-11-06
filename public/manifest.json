@@ -1,0 +1,15 @@
+{
+  "short_name": "Valkat POS",
+  "name": "Valkat Store - POS",
+  "icons": [
+    {
+      "src": "/iconologo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "theme_color": "#16a34a"
+}

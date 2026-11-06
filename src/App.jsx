@@ -128,6 +128,29 @@ const resumirTopProductos = (filas) => {
   }
 }
 
+const claseInputModal = 'w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+
+// Efectivo que realmente entró a la caja física con estas ventas
+const efectivoDeVentas = (filas) => (filas || []).reduce((acc, v) => acc + (
+  v.monto_efectivo != null
+    ? Number(v.monto_efectivo)
+    : (v.medio_pago === 'Efectivo' ? Number(v.total) : 0)
+), 0)
+
+// Efectivo disponible en un turno: sencillo + ventas en efectivo - retiros.
+// "cliente" permite consultar con la sesión del admin (supabaseAuth) o la actual (supabase).
+const calcularCajaTurno = async (cliente, turno) => {
+  const [ventasRes, retirosRes] = await Promise.all([
+    cliente.from('ventas').select('total, medio_pago, monto_efectivo').eq('caja_turno_id', turno.id),
+    cliente.from('retiros_caja').select('monto').eq('caja_turno_id', turno.id)
+  ])
+  if (ventasRes.error) throw ventasRes.error
+  if (retirosRes.error) throw retirosRes.error
+  const ventasEfectivo = efectivoDeVentas(ventasRes.data)
+  const retiros = (retirosRes.data || []).reduce((acc, r) => acc + Number(r.monto), 0)
+  return { ventasEfectivo, retiros, disponible: Number(turno.monto_apertura) + ventasEfectivo - retiros }
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [rol, setRol] = useState(null)
@@ -147,6 +170,16 @@ function App() {
   const [turnoDetalle, setTurnoDetalle] = useState(null)
   const [ventasTurnoDetalle, setVentasTurnoDetalle] = useState([])
   const [cargandoDetalle, setCargandoDetalle] = useState(false)
+  const [retirosTurnoDetalle, setRetirosTurnoDetalle] = useState([])
+
+  // Retiros de caja
+  const [mostrarModalRetiro, setMostrarModalRetiro] = useState(false) // retiro desde la caja del cajero
+  const [retiroEmailAdmin, setRetiroEmailAdmin] = useState('')
+  const [retiroPasswordAdmin, setRetiroPasswordAdmin] = useState('')
+  const [retiroMonto, setRetiroMonto] = useState('')
+  const [retiroMotivo, setRetiroMotivo] = useState('')
+  const [turnoRetiro, setTurnoRetiro] = useState(null) // retiro desde el panel del admin
+  const [retiroDisponible, setRetiroDisponible] = useState(null)
 
   const [debeCambiarPassword, setDebeCambiarPassword] = useState(false)
   const [nuevaPassword, setNuevaPassword] = useState('')
@@ -382,9 +415,134 @@ function App() {
     cargarReporteVentas(id)
   }
 
+  const cerrarModalesRetiro = () => {
+    setMostrarModalRetiro(false)
+    setTurnoRetiro(null)
+    setRetiroDisponible(null)
+    setRetiroEmailAdmin('')
+    setRetiroPasswordAdmin('')
+    setRetiroMonto('')
+    setRetiroMotivo('')
+  }
+
+  // Desde la caja del cajero: el admin se autentica y el retiro se registra con SU sesión
+  const registrarRetiroCajero = async (e) => {
+    e.preventDefault()
+    const monto = parseFloat(retiroMonto)
+    const motivo = retiroMotivo.trim()
+    if (!(monto > 0)) return notificar('Ingresa un monto válido mayor a 0.', 'aviso')
+    if (!motivo) return notificar('Indica el motivo del retiro.', 'aviso')
+
+    setCargando(true)
+    try {
+      const { data: authData, error: authError } = await supabaseAuth.auth.signInWithPassword({
+        email: retiroEmailAdmin,
+        password: retiroPasswordAdmin
+      })
+      if (authError) {
+        notificar('Credenciales de administrador incorrectas.', 'error')
+        return
+      }
+
+      const { data: userData } = await supabaseAuth
+        .from('usuarios')
+        .select('rol')
+        .eq('id', authData.user.id)
+        .maybeSingle()
+      if (!userData || userData.rol !== 'admin') {
+        notificar('Este usuario no tiene rango de Administrador.', 'aviso')
+        return
+      }
+
+      const caja = await calcularCajaTurno(supabaseAuth, turnoAbierto)
+      if (monto > caja.disponible + 0.001) {
+        notificar(`El retiro supera el efectivo disponible en caja (${soles(caja.disponible)}).`, 'aviso')
+        return
+      }
+
+      const { error } = await supabaseAuth.from('retiros_caja').insert([{
+        caja_turno_id: turnoAbierto.id,
+        monto,
+        motivo,
+        autorizado_por: authData.user.id
+      }])
+      if (error) throw error
+
+      cerrarModalesRetiro()
+      notificar(`Retiro de ${soles(monto)} registrado. Quedan ${soles(caja.disponible - monto)} en caja.`, 'exito')
+    } catch (err) {
+      notificar('Error al registrar el retiro: ' + err.message, 'error')
+    } finally {
+      await supabaseAuth.auth.signOut()
+      setCargando(false)
+    }
+  }
+
+  // Desde el panel del admin, sobre un turno abierto
+  const abrirRetiroAdmin = async (turno) => {
+    setTurnoRetiro(turno)
+    setRetiroDisponible(null)
+    setRetiroMonto('')
+    setRetiroMotivo('')
+    try {
+      const caja = await calcularCajaTurno(supabase, turno)
+      setRetiroDisponible(caja.disponible)
+    } catch (err) {
+      notificar('No se pudo calcular el efectivo de la caja: ' + err.message, 'error')
+      setTurnoRetiro(null)
+    }
+  }
+
+  const registrarRetiroAdmin = async (e) => {
+    e.preventDefault()
+    const monto = parseFloat(retiroMonto)
+    const motivo = retiroMotivo.trim()
+    if (!(monto > 0)) return notificar('Ingresa un monto válido mayor a 0.', 'aviso')
+    if (!motivo) return notificar('Indica el motivo del retiro.', 'aviso')
+
+    setCargando(true)
+    try {
+      // El turno pudo cerrarse mientras tenías el modal abierto
+      const { data: turnoActual } = await supabase
+        .from('caja_turnos').select('estado').eq('id', turnoRetiro.id).maybeSingle()
+      if (!turnoActual || turnoActual.estado !== 'Abierta') {
+        notificar('Este turno ya fue cerrado; no se pueden registrar más retiros.', 'aviso')
+        cerrarModalesRetiro()
+        cargarTurnosAdmin()
+        return
+      }
+
+      const caja = await calcularCajaTurno(supabase, turnoRetiro)
+      if (monto > caja.disponible + 0.001) {
+        setRetiroDisponible(caja.disponible)
+        notificar(`El retiro supera el efectivo disponible en caja (${soles(caja.disponible)}).`, 'aviso')
+        return
+      }
+
+      const { error } = await supabase.from('retiros_caja').insert([{
+        caja_turno_id: turnoRetiro.id,
+        monto,
+        motivo,
+        autorizado_por: session.user.id
+      }])
+      if (error) throw error
+
+      const turnoId = turnoRetiro.id
+      cerrarModalesRetiro()
+      notificar(`Retiro de ${soles(monto)} registrado. Quedan ${soles(caja.disponible - monto)} en caja.`, 'exito')
+      cargarTurnosAdmin()
+      if (turnoDetalle && turnoDetalle.id === turnoId) verDetalleTurno(turnoDetalle)
+    } catch (err) {
+      notificar('Error al registrar el retiro: ' + err.message, 'error')
+    } finally {
+      setCargando(false)
+    }
+  }
+
   const verDetalleTurno = async (turno) => {
     setTurnoDetalle(turno)
     setVentasTurnoDetalle([])
+    setRetirosTurnoDetalle([])
     setCargandoDetalle(true)
 
     const { data, error } = await supabase
@@ -401,6 +559,17 @@ function App() {
       notificar('Error al cargar el detalle del turno: ' + error.message, 'error')
     } else {
       setVentasTurnoDetalle(data || [])
+    }
+
+    const { data: retiros, error: retirosError } = await supabase
+      .from('retiros_caja')
+      .select('id, monto, motivo, created_at, usuarios (nombre_completo)')
+      .eq('caja_turno_id', turno.id)
+      .order('created_at', { ascending: true })
+    if (retirosError) {
+      notificar('Error al cargar los retiros del turno: ' + retirosError.message, 'error')
+    } else {
+      setRetirosTurnoDetalle(retiros || [])
     }
     setCargandoDetalle(false)
   }
@@ -851,7 +1020,15 @@ function App() {
 
       if (ventasError) throw ventasError
 
-      // 2. Esperado en caja = sencillo inicial + ventas cobradas en efectivo
+      // Retiros autorizados durante el turno (salieron de la caja física)
+      const { data: retirosTurno, error: retirosError } = await supabase
+        .from('retiros_caja')
+        .select('monto')
+        .eq('caja_turno_id', turnoAbierto.id)
+      if (retirosError) throw retirosError
+      const totalRetiros = (retirosTurno || []).reduce((acc, r) => acc + Number(r.monto), 0)
+
+      // 2. Esperado en caja = sencillo inicial + ventas en efectivo - retiros
       const filasVentas = ventasTurno || []
       const totalVentas = filasVentas.reduce((acc, v) => acc + Number(v.total), 0)
       // Solo el efectivo entra al cuadre; Yape/Plin y POS no están en la caja física.
@@ -862,7 +1039,7 @@ function App() {
           : (v.medio_pago === 'Efectivo' ? Number(v.total) : 0)
       ), 0)
       const ventasDigitales = totalVentas - ventasEfectivo
-      const montoEsperado = Number(turnoAbierto.monto_apertura) + ventasEfectivo
+      const montoEsperado = Number(turnoAbierto.monto_apertura) + ventasEfectivo - totalRetiros
       const efectivoReal = parseFloat(efectivoRealCaja)
       const diferenciaCalculada = efectivoReal - montoEsperado
 
@@ -887,6 +1064,7 @@ function App() {
         totalVentas,
         ventasEfectivo,
         ventasDigitales,
+        retiros: totalRetiros,
         esperado: montoEsperado,
         real: efectivoReal,
         diferencia: diferenciaCalculada
@@ -956,6 +1134,7 @@ function App() {
                 <div className="divide-y divide-gray-100">
                   {fila('Sencillo inicial', resumenCierre.apertura)}
                   {fila('Ventas en efectivo', resumenCierre.ventasEfectivo)}
+                  {resumenCierre.retiros > 0 && fila('Retiros de caja (-)', resumenCierre.retiros)}
                   {fila('Monto esperado', resumenCierre.esperado, true)}
                   {fila('Efectivo contado', resumenCierre.real, true)}
                 </div>
@@ -1146,9 +1325,16 @@ function App() {
                         </span>
                       </td>
                       <td className="p-4">
-                        <button onClick={() => verDetalleTurno(turno)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs px-3 py-1.5 rounded-lg transition whitespace-nowrap">
+                        <div className="flex flex-col gap-1.5 items-start">
+                          <button onClick={() => verDetalleTurno(turno)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs px-3 py-1.5 rounded-lg transition whitespace-nowrap">
                           🔍 Ver detalle
                         </button>
+                          {turno.estado === 'Abierta' && (
+                            <button onClick={() => abrirRetiroAdmin(turno)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs px-3 py-1.5 rounded-lg transition whitespace-nowrap">
+                              💸 Retirar efectivo
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1161,10 +1347,48 @@ function App() {
           </div>
         )}
 
+        {/* MODAL RETIRO DE CAJA (ADMIN) */}
+        {turnoRetiro && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[55]">
+            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-indigo-200">
+              <div className="flex justify-center mb-2"><span className="text-3xl">💸</span></div>
+              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Retiro de Caja</h3>
+              <p className="text-xs text-gray-500 text-center mb-4">Turno de {turnoRetiro.usuarios?.nombre_completo || 'cajero'}</p>
+
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-center mb-4">
+                <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider">Efectivo disponible en caja</span>
+                <p className="text-2xl font-extrabold text-indigo-900 mt-1">{retiroDisponible === null ? 'Calculando...' : soles(retiroDisponible)}</p>
+                <span className="text-[10px] text-indigo-500">Sencillo inicial + ventas en efectivo - retiros anteriores</span>
+              </div>
+
+              <form onSubmit={registrarRetiroAdmin} autoComplete="off" className="flex flex-col gap-3">
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-gray-600">Monto a retirar (S/)</label>
+                    <button type="button" disabled={retiroDisponible === null} onClick={() => setRetiroMonto(Math.max(0, retiroDisponible).toFixed(2))} className="text-xs font-bold text-indigo-600 hover:text-indigo-800">Retirar todo</button>
+                  </div>
+                  <input type="number" step="0.01" min="0.01" required autoComplete="off" placeholder="0.00" value={retiroMonto} onChange={(e) => setRetiroMonto(e.target.value)} className={claseInputModal} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Motivo</label>
+                  <input type="text" required autoComplete="off" placeholder="Ej: Depósito al banco, pago a proveedor" value={retiroMotivo} onChange={(e) => setRetiroMotivo(e.target.value)} className={claseInputModal} />
+                </div>
+                <div className="flex gap-3 mt-2">
+                  <button type="button" onClick={cerrarModalesRetiro} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
+                  <button type="submit" disabled={cargando || retiroDisponible === null} className="w-1/2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-sm shadow-md">
+                    {cargando ? 'Guardando...' : 'Registrar retiro'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* MODAL DETALLE DE TURNO */}
         {turnoDetalle && (() => {
           const r = resumirVentasTurno(ventasTurnoDetalle)
           const cerrado = turnoDetalle.estado !== 'Abierta'
+          const totalRetirosDetalle = retirosTurnoDetalle.reduce((acc, x) => acc + Number(x.monto), 0)
           const kpi = (titulo, valor, clase) => (
             <div className={`p-3 rounded-xl border ${clase}`}>
               <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">{titulo}</span>
@@ -1203,9 +1427,10 @@ function App() {
                       </p>
                     )}
 
-                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                       <div><span className="block text-[11px] text-gray-500">Sencillo inicial</span><b>{soles(turnoDetalle.monto_apertura)}</b></div>
-                      <div><span className="block text-[11px] text-gray-500">Esperado en caja</span><b>{cerrado ? soles(turnoDetalle.monto_cierre_esperado) : soles(Number(turnoDetalle.monto_apertura) + r.efectivo) + ' (parcial)'}</b></div>
+                      <div><span className="block text-[11px] text-gray-500">Retiros</span><b className={totalRetirosDetalle > 0 ? 'text-indigo-700' : ''}>{totalRetirosDetalle > 0 ? '-' : ''}{soles(totalRetirosDetalle)}</b></div>
+                      <div><span className="block text-[11px] text-gray-500">Esperado en caja</span><b>{cerrado ? soles(turnoDetalle.monto_cierre_esperado) : soles(Number(turnoDetalle.monto_apertura) + r.efectivo - totalRetirosDetalle) + ' (parcial)'}</b></div>
                       <div><span className="block text-[11px] text-gray-500">Efectivo contado</span><b>{cerrado ? soles(turnoDetalle.monto_cierre_real) : 'En caja'}</b></div>
                       <div>
                         <span className="block text-[11px] text-gray-500">Diferencia</span>
@@ -1216,6 +1441,39 @@ function App() {
                         ) : <b>-</b>}
                       </div>
                     </div>
+
+                    {(retirosTurnoDetalle.length > 0 || !cerrado) && (
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <h4 className="text-sm font-bold text-gray-700">💸 Retiros de caja</h4>
+                          {!cerrado && (
+                            <button onClick={() => abrirRetiroAdmin(turnoDetalle)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                              + Retirar efectivo
+                            </button>
+                          )}
+                        </div>
+                        <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-gray-50 text-gray-600 text-xs">
+                              <tr><th className="p-3">Hora</th><th className="p-3">Motivo</th><th className="p-3">Autorizó</th><th className="p-3 text-right">Monto</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {retirosTurnoDetalle.map(x => (
+                                <tr key={x.id}>
+                                  <td className="p-3 text-xs text-gray-500 whitespace-nowrap">{fechaLocal(x.created_at)?.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                                  <td className="p-3 text-xs text-gray-800">{x.motivo}</td>
+                                  <td className="p-3 text-xs text-gray-600">{x.usuarios?.nombre_completo || '-'}</td>
+                                  <td className="p-3 text-right font-bold text-indigo-700 whitespace-nowrap">-{soles(x.monto)}</td>
+                                </tr>
+                              ))}
+                              {retirosTurnoDetalle.length === 0 && (
+                                <tr><td colSpan="4" className="p-4 text-center text-gray-400 text-xs">Este turno aún no tiene retiros.</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
 
                     <div>
                       <h4 className="text-sm font-bold text-gray-700 mb-2">📦 Productos vendidos</h4>
@@ -1679,9 +1937,14 @@ function App() {
                   <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full">Caja Abierta</span>
                   <p className="text-xs text-gray-500 mt-1">Sencillo inicial: <span className="font-bold text-gray-800">S/ {turnoAbierto.monto_apertura}</span></p>
                 </div>
-                <button onClick={() => setMostrarModalCierre(true)} className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition shadow-xs">
-                  🔒 Cerrar Caja / Cuadre
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={() => setMostrarModalRetiro(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition shadow-xs">
+                    💸 Retiro de Caja
+                  </button>
+                  <button onClick={() => setMostrarModalCierre(true)} className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition shadow-xs">
+                    🔒 Cerrar Caja / Cuadre
+                  </button>
+                </div>
               </div>
 
               {/* BARRA DE BÚSQUEDA Y FILTROS */}
@@ -1979,6 +2242,41 @@ function App() {
           </div>
         )}
 
+        {/* MODAL RETIRO DE CAJA (AUTORIZADO POR UN ADMIN) */}
+        {mostrarModalRetiro && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-indigo-200">
+              <div className="flex justify-center mb-2"><span className="text-3xl">💸</span></div>
+              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Retiro de Caja</h3>
+              <p className="text-xs text-gray-500 text-center mb-5">Un Administrador debe autorizar el retiro con sus credenciales.</p>
+
+              <form onSubmit={registrarRetiroCajero} autoComplete="off" className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Monto a retirar (S/)</label>
+                  <input type="number" step="0.01" min="0.01" required autoComplete="off" placeholder="0.00" value={retiroMonto} onChange={(e) => setRetiroMonto(e.target.value)} className={claseInputModal} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Motivo</label>
+                  <input type="text" required autoComplete="off" placeholder="Ej: Depósito al banco, pago a proveedor" value={retiroMotivo} onChange={(e) => setRetiroMotivo(e.target.value)} className={claseInputModal} />
+                </div>
+
+                <div className="border-t pt-3 mt-1 flex flex-col gap-3">
+                  <p className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider">Autorización del administrador</p>
+                  <input type="email" name="admin-retiro-correo" autoComplete="off" data-lpignore="true" data-1p-ignore readOnly onFocus={(e) => e.target.removeAttribute('readonly')} required placeholder="Ingresa el correo del administrador" value={retiroEmailAdmin} onChange={(e) => setRetiroEmailAdmin(e.target.value)} className={claseInputModal} />
+                  <input type="password" name="admin-retiro-clave" autoComplete="new-password" data-lpignore="true" data-1p-ignore readOnly onFocus={(e) => e.target.removeAttribute('readonly')} required placeholder="Ingresa la contraseña del administrador" value={retiroPasswordAdmin} onChange={(e) => setRetiroPasswordAdmin(e.target.value)} className={claseInputModal} />
+                </div>
+
+                <div className="flex gap-3 mt-2">
+                  <button type="button" onClick={cerrarModalesRetiro} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
+                  <button type="submit" disabled={cargando} className="w-1/2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-sm shadow-md">
+                    {cargando ? 'Validando...' : 'Autorizar retiro'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* MODAL DE DESCUENTO ALTO */}
         {mostrarModalDescuento && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -1987,9 +2285,15 @@ function App() {
               <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Autorización Requerida</h3>
               <p className="text-xs text-gray-500 text-center mb-6">El descuento supera los S/ 20.00. Un Administrador debe ingresar sus datos.</p>
 
-              <form onSubmit={autorizarDescuentoAlto} className="flex flex-col gap-4">
-                <input type="email" required placeholder="Correo del Administrador" value={emailAdminDesc} onChange={(e) => setEmailAdminDesc(e.target.value)} className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-sm" />
-                <input type="password" required placeholder="Contraseña del Administrador" value={passwordAdminDesc} onChange={(e) => setPasswordAdminDesc(e.target.value)} className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-sm" />
+              <form onSubmit={autorizarDescuentoAlto} autoComplete="off" className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Correo del Administrador</label>
+                  <input type="email" name="admin-descuento-correo" autoComplete="off" data-lpignore="true" data-1p-ignore readOnly onFocus={(e) => e.target.removeAttribute('readonly')} required placeholder="Ingresa el correo del administrador" value={emailAdminDesc} onChange={(e) => setEmailAdminDesc(e.target.value)} className={claseInputModal} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Contraseña del Administrador</label>
+                  <input type="password" name="admin-descuento-clave" autoComplete="new-password" data-lpignore="true" data-1p-ignore readOnly onFocus={(e) => e.target.removeAttribute('readonly')} required placeholder="Ingresa la contraseña del administrador" value={passwordAdminDesc} onChange={(e) => setPasswordAdminDesc(e.target.value)} className={claseInputModal} />
+                </div>
                 <div className="flex gap-3 mt-2">
                   <button type="button" onClick={() => { setMostrarModalDescuento(false); setEmailAdminDesc(''); setPasswordAdminDesc(''); }} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
                   <button type="submit" disabled={cargando} className="w-1/2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm shadow-md">Autorizar</button>

@@ -26,3 +26,8 @@ dist-ssr
 node_modules
 dist
 .DS_Store
+node_modules/
+dist/
+build/
+*.exe
+Valkat Store-win32-x64/

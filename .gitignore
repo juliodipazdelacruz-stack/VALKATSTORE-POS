@@ -31,3 +31,5 @@ dist/
 build/
 *.exe
 Valkat Store-win32-x64/
+.env  
+supabase/.temp

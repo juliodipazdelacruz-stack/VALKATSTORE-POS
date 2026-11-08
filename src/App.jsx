@@ -239,6 +239,8 @@ function App() {
   const [clienteNombre, setClienteNombre] = useState('')
   const [clienteDocumento, setClienteDocumento] = useState('')
   const [clienteTelefono, setClienteTelefono] = useState('')
+  const [consultandoDocumento, setConsultandoDocumento] = useState(false)
+  const [datosConsultados, setDatosConsultados] = useState(false)
 
   // Notificaciones y resumen de cierre
   const [toast, setToast] = useState(null)
@@ -823,6 +825,52 @@ function App() {
     setClienteNombre('')
     setClienteDocumento('')
     setClienteTelefono('')
+    setDatosConsultados(false)
+  }
+
+  // Trae el nombre / razón social desde RENIEC o SUNAT (vía Edge Function con el token en el servidor)
+  const consultarDocumento = async (docParam) => {
+    const numero = String(docParam ?? clienteDocumento).trim()
+    const tipo = /^\d{8}$/.test(numero) ? 'dni' : /^\d{11}$/.test(numero) ? 'ruc' : null
+    if (!tipo) return notificar('Ingresa un DNI de 8 dígitos o un RUC de 11 dígitos para consultar.', 'aviso')
+
+    // Si ya está registrado no se gasta una consulta de la API
+    const existente = clientes.find(c => c.documento === numero)
+    if (existente) {
+      setClienteSeleccionado(existente)
+      setBusquedaCliente('')
+      cerrarModalCliente()
+      notificar(`${existente.nombre} ya estaba registrado y quedó seleccionado.`, 'exito')
+      return
+    }
+
+    setConsultandoDocumento(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('consulta-documento', { body: { tipo, numero } })
+      if (error) throw error
+      if (!data?.ok) {
+        setDatosConsultados(false)
+        notificar((data?.mensaje || 'No se encontraron datos.') + ' Puedes escribir el nombre manualmente.', 'aviso')
+        return
+      }
+      setClienteNombre(data.nombre)
+      setDatosConsultados(true)
+    } catch (err) {
+      setDatosConsultados(false)
+      notificar('No se pudo consultar el documento. Puedes escribir el nombre manualmente.', 'error')
+    } finally {
+      setConsultandoDocumento(false)
+    }
+  }
+
+  // Desde el buscador del carrito: abre el modal con el documento ya escrito y lo consulta
+  const registrarDesdeBusqueda = (documento) => {
+    setClienteDocumento(documento)
+    setClienteNombre('')
+    setDatosConsultados(false)
+    setMostrarModalCliente(true)
+    setMostrarListaClientes(false)
+    consultarDocumento(documento)
   }
 
   const guardarCliente = async (e) => {
@@ -2048,7 +2096,18 @@ function App() {
                             </button>
                           ))}
                           {clientesFiltrados.length === 0 && (
+                            /^\d{8}$|^\d{11}$/.test(busquedaCliente.trim()) ? (
+                            <button
+                              type="button"
+                              onMouseDown={() => registrarDesdeBusqueda(busquedaCliente.trim())}
+                              className="w-full text-left px-3 py-3 hover:bg-blue-50"
+                            >
+                              <p className="text-xs font-bold text-blue-700">🔎 Consultar {busquedaCliente.trim().length === 8 ? 'DNI' : 'RUC'} {busquedaCliente.trim()}</p>
+                              <p className="text-[11px] text-gray-500">No está registrado. Se buscará en RENIEC/SUNAT.</p>
+                            </button>
+                          ) : (
                             <p className="px-3 py-3 text-xs text-gray-400 text-center">Sin coincidencias. Usa "+ Nuevo cliente".</p>
+                          )
                           )}
                         </div>
                       )}
@@ -2183,7 +2242,28 @@ function App() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">DNI / RUC (opcional)</label>
-                  <input type="text" value={clienteDocumento} onChange={(e) => setClienteDocumento(e.target.value)} placeholder="Documento" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm" />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={clienteDocumento}
+                      onChange={(e) => { setClienteDocumento(e.target.value); setDatosConsultados(false) }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); consultarDocumento() } }}
+                      placeholder="DNI (8 dígitos) o RUC (11)"
+                      className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => consultarDocumento()}
+                      disabled={consultandoDocumento}
+                      className="px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-bold rounded-xl whitespace-nowrap transition"
+                    >
+                      {consultandoDocumento ? 'Consultando...' : '🔎 Consultar'}
+                    </button>
+                  </div>
+                  <p className={`text-[11px] mt-1 ${datosConsultados ? 'text-green-600 font-semibold' : 'text-gray-400'}`}>
+                    {datosConsultados ? '✔ Datos obtenidos de RENIEC/SUNAT. Puedes corregirlos si hace falta.' : 'Escribe el documento y pulsa Consultar para traer el nombre automáticamente.'}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Teléfono (opcional)</label>

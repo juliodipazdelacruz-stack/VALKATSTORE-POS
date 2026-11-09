@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { supabase } from './supabase'
+import SpecsEditor, { cargarFicha, guardarFicha } from './SpecsEditor'
+import EscanerCodigo from './EscanerCodigo'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -219,6 +221,10 @@ function App() {
   const [prodTipo, setProdTipo] = useState('Cámaras')
   const [prodPrecio, setProdPrecio] = useState('')
   const [prodStock, setProdStock] = useState('')
+  const [prodApodos, setProdApodos] = useState('')
+  const [prodCodigo, setProdCodigo] = useState('')
+  const [prodSpecs, setProdSpecs] = useState({})
+  const [mostrarEscaner, setMostrarEscaner] = useState(false)
 
   // Estados para Cierre y Cuadre de Caja
   const [mostrarModalCierre, setMostrarModalCierre] = useState(false)
@@ -670,43 +676,58 @@ function App() {
     e.preventDefault()
     setCargando(true)
 
+    const datosProducto = {
+      nombre: prodNombre,
+      marca: prodMarca,
+      tipo: prodTipo,
+      precio: parseFloat(prodPrecio),
+      stock: parseInt(prodStock)
+    }
+
+    let productoId = prodIdEditando
+    let errorProducto = null
+
     if (modoEdicion) {
       const { error } = await supabase
         .from('productos')
-        .update({
-          nombre: prodNombre,
-          marca: prodMarca,
-          tipo: prodTipo,
-          precio: parseFloat(prodPrecio),
-          stock: parseInt(prodStock)
-        })
+        .update(datosProducto)
         .eq('id', prodIdEditando)
-
-      if (error) {
-        notificar('Error al actualizar producto: ' + error.message)
-      } else {
-        notificar('¡Producto actualizado con éxito!')
-        setMostrarModalProductoAdmin(false)
-        cargarProductos()
-      }
+      errorProducto = error
     } else {
-      const { error } = await supabase.from('productos').insert([{
-        nombre: prodNombre,
-        marca: prodMarca,
-        tipo: prodTipo,
-        precio: parseFloat(prodPrecio),
-        stock: parseInt(prodStock)
-      }])
-
-      if (error) {
-        notificar('Error al registrar producto: ' + error.message)
-      } else {
-        notificar('¡Producto agregado al inventario global con éxito!')
-        setMostrarModalProductoAdmin(false)
-        cargarProductos()
-      }
+      const { data, error } = await supabase
+        .from('productos')
+        .insert([datosProducto])
+        .select('id')
+        .single()
+      errorProducto = error
+      productoId = data?.id
     }
 
+    if (errorProducto) {
+      notificar((modoEdicion ? 'Error al actualizar producto: ' : 'Error al registrar producto: ') + errorProducto.message)
+      setCargando(false)
+      return
+    }
+
+    // Ficha técnica (apodos, código de barras, especificaciones)
+    const { error: errorFicha } = await guardarFicha(supabase, productoId, {
+      apodos: prodApodos,
+      codigo: prodCodigo,
+      specs: prodSpecs
+    })
+
+    if (errorFicha) {
+      notificar(errorFicha.code === '23505'
+        ? 'Producto guardado, pero ese código de barras ya pertenece a otro producto.'
+        : 'Producto guardado, pero falló la ficha técnica: ' + errorFicha.message)
+    } else {
+      notificar(modoEdicion
+        ? '¡Producto actualizado con éxito!'
+        : '¡Producto agregado al inventario global con éxito!')
+      setMostrarModalProductoAdmin(false)
+    }
+
+    cargarProductos()
     setCargando(false)
   }
 
@@ -718,10 +739,15 @@ function App() {
     setProdTipo('Cámaras')
     setProdPrecio('')
     setProdStock('')
+    setProdApodos('')
+    setProdCodigo('')
+    setProdSpecs({})
     setMostrarModalProductoAdmin(true)
   }
 
-  const abrirModalEditar = (prod) => {
+  const abrirModalEditar = async (prod) => {
+    // Se carga la ficha antes de abrir el modal para que el editor nazca con sus datos
+    const ficha = await cargarFicha(supabase, prod.id)
     setModoEdicion(true)
     setProdIdEditando(prod.id)
     setProdNombre(prod.nombre)
@@ -729,6 +755,9 @@ function App() {
     setProdTipo(prod.tipo)
     setProdPrecio(prod.precio)
     setProdStock(prod.stock)
+    setProdApodos(ficha?.apodos ?? '')
+    setProdCodigo(ficha?.codigo_barras ?? '')
+    setProdSpecs(ficha?.especificaciones ?? {})
     setMostrarModalProductoAdmin(true)
   }
 
@@ -1894,7 +1923,7 @@ function App() {
         {/* MODAL DE PRODUCTO */}
         {mostrarModalProductoAdmin && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-lg border border-green-200">
+            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-lg border border-green-200 max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-bold text-gray-800 mb-1">
                 {modoEdicion ? '✏️ Editar Producto Existente' : '➕ Registrar Nuevo Producto'}
               </h3>
@@ -1926,6 +1955,26 @@ function App() {
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Stock Actual</label>
                   <input type="number" required placeholder="10" value={prodStock} onChange={(e) => setProdStock(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Apodos y N.º de panel (separados por coma)</label>
+                  <input type="text" placeholder="Ej. 5, robot, giratoria, interior" value={prodApodos} onChange={(e) => setProdApodos(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Código de barras (escanea con el lector o escribe)</label>
+                  <div className="flex gap-2">
+                    <input type="text" inputMode="numeric" placeholder="Ej. 6939554912345" value={prodCodigo} onChange={(e) => setProdCodigo(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                    <button type="button" onClick={() => setMostrarEscaner(true)} className="shrink-0 bg-gray-800 hover:bg-gray-900 text-white font-bold px-4 rounded-xl text-sm">Escanear</button>
+                  </div>
+                  {mostrarEscaner && (
+                    <EscanerCodigo
+                      onCodigo={(c) => { setProdCodigo(c); setMostrarEscaner(false) }}
+                      onCerrar={(msg) => { setMostrarEscaner(false); if (msg) notificar(msg, 'aviso') }}
+                    />
+                  )}
+                </div>
+                <div className="md:col-span-2">
+                  <SpecsEditor key={prodIdEditando ?? 'nuevo'} inicial={prodSpecs} tipo={prodTipo} onChange={setProdSpecs} />
                 </div>
                 <div className="md:col-span-2 flex gap-3 mt-4">
                   <button type="button" onClick={() => setMostrarModalProductoAdmin(false)} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-xl transition text-sm">Cancelar</button>

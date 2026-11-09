@@ -6,9 +6,9 @@ import { useState } from 'react'
 // "Marca" no aparece porque ya es una columna de productos.
 const PLANTILLAS = {
   'Cámaras': ['App móvil', 'Resolución', 'Lente', 'Conectividad', 'Visión nocturna', 'Audio',
-              'Alimentación', 'Días 32GB', 'Días 64GB', 'Días 128GB', 'Días 256GB'],
+              'Alimentación', 'Memoria 32GB', 'Memoria 64GB', 'Memoria 128GB', 'Memoria 256GB'],
   'Cámara Foco': ['App móvil', 'Resolución', 'Rosca', 'Conectividad', 'Visión nocturna',
-                  'Días 32GB', 'Días 64GB', 'Días 128GB'],
+                  'Memoria 32GB', 'Memoria 64GB', 'Memoria 128GB'],
   'NVR / Grabadores': ['App móvil', 'Canales', 'Resolución máxima', 'Disco duro máximo', 'Salida de video'],
   'Almacenamiento': ['Capacidad', 'Clase / velocidad', 'Uso recomendado'],
   'Networking': ['Puertos', 'Velocidad', 'Alcance'],
@@ -74,9 +74,9 @@ export default function SpecsEditor({ inicial, tipo, onChange }) {
 
       {filas.map((f) => (
         <div key={f.id} className="flex gap-2">
-          <input className={`${input} w-2/5`} placeholder="Ej. Días 64GB"
+          <input className={`${input} w-2/5`} placeholder="Ej. Memoria 64GB"
             value={f.clave} onChange={(e) => editar(f.id, 'clave', e.target.value)} />
-          <input className={input} placeholder="Ej. 12 días"
+          <input className={input} placeholder="Ej. 12 días de grabación"
             value={f.valor} onChange={(e) => editar(f.id, 'valor', e.target.value)} />
           <button type="button" onClick={() => quitar(f.id)} aria-label="Quitar detalle"
             className="px-2 text-gray-400 hover:text-red-600">✕</button>

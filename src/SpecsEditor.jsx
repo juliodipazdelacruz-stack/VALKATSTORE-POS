@@ -95,19 +95,20 @@ export default function SpecsEditor({ inicial, tipo, onChange }) {
 export async function cargarFicha(supabase, productoId) {
   const { data } = await supabase
     .from('productos_ficha')
-    .select('apodos, codigo_barras, especificaciones')
+    .select('apodos, codigo_barras, especificaciones, imagen_url')
     .eq('producto_id', productoId)
     .maybeSingle()
   return data // null si el producto aún no tiene ficha
 }
 
-export async function guardarFicha(supabase, productoId, { apodos, codigo, specs }) {
+export async function guardarFicha(supabase, productoId, { apodos, codigo, specs, imagen }) {
   const apodosLimpios = apodos.split(',').map((a) => a.trim()).filter(Boolean).join(', ')
   return supabase.from('productos_ficha').upsert({
     producto_id: productoId,
     apodos: apodosLimpios,
     codigo_barras: codigo.trim() || null, // null evita choque con el índice único
     especificaciones: specs,
+    imagen_url: imagen || null,
     updated_at: new Date().toISOString(),
   })
 }

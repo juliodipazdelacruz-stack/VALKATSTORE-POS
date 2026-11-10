@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import SpecsEditor, { cargarFicha, guardarFicha } from './SpecsEditor'
 import EscanerCodigo from './EscanerCodigo'
+import SelectorImagen, { subirImagen } from './SelectorImagen'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -225,6 +226,8 @@ function App() {
   const [prodCodigo, setProdCodigo] = useState('')
   const [prodSpecs, setProdSpecs] = useState({})
   const [mostrarEscaner, setMostrarEscaner] = useState(false)
+  const [prodImagenUrl, setProdImagenUrl] = useState('')
+  const [prodImagenArchivo, setProdImagenArchivo] = useState(null)
 
   // Estados para Cierre y Cuadre de Caja
   const [mostrarModalCierre, setMostrarModalCierre] = useState(false)
@@ -710,10 +713,19 @@ function App() {
     }
 
     // Ficha técnica (apodos, código de barras, especificaciones)
+    // Foto (si se eligió una nueva); si falla la subida, se conserva la anterior
+    let imagenUrl = prodImagenUrl
+    if (prodImagenArchivo) {
+      const r = await subirImagen(supabase, productoId, prodImagenArchivo)
+      if (r.error) notificar('No se pudo subir la foto: ' + (r.error.message || r.error))
+      else imagenUrl = r.url
+    }
+
     const { error: errorFicha } = await guardarFicha(supabase, productoId, {
       apodos: prodApodos,
       codigo: prodCodigo,
-      specs: prodSpecs
+      specs: prodSpecs,
+      imagen: imagenUrl
     })
 
     if (errorFicha) {
@@ -742,6 +754,8 @@ function App() {
     setProdApodos('')
     setProdCodigo('')
     setProdSpecs({})
+    setProdImagenUrl('')
+    setProdImagenArchivo(null)
     setMostrarModalProductoAdmin(true)
   }
 
@@ -758,6 +772,8 @@ function App() {
     setProdApodos(ficha?.apodos ?? '')
     setProdCodigo(ficha?.codigo_barras ?? '')
     setProdSpecs(ficha?.especificaciones ?? {})
+    setProdImagenUrl(ficha?.imagen_url ?? '')
+    setProdImagenArchivo(null)
     setMostrarModalProductoAdmin(true)
   }
 
@@ -1955,6 +1971,9 @@ function App() {
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Stock Actual</label>
                   <input type="number" required placeholder="10" value={prodStock} onChange={(e) => setProdStock(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                </div>
+                <div className="md:col-span-2">
+                  <SelectorImagen urlActual={prodImagenUrl} onArchivo={setProdImagenArchivo} />
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-gray-600 mb-1">Apodos y N.º de panel (separados por coma)</label>

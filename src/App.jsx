@@ -5,6 +5,8 @@ import SpecsEditor, { cargarFicha, guardarFicha } from './SpecsEditor'
 import EscanerCodigo from './EscanerCodigo'
 import SelectorImagen, { subirImagen } from './SelectorImagen'
 import AdminWeb from './AdminWeb'
+import AdminCuentas from './AdminCuentas'
+import GestorListas from './GestorListas'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -155,6 +157,12 @@ const calcularCajaTurno = async (cliente, turno) => {
   return { ventasEfectivo, retiros, disponible: Number(turno.monto_apertura) + ventasEfectivo - retiros }
 }
 
+// Emojis solo para las categorías de siempre; las nuevas salen con 📁
+const EMOJI_CATEGORIA = {
+  'Cámaras': '📷', 'NVR / Grabadores': '🖥️', 'Almacenamiento': '💾', 'Networking': '🌐',
+  'Accesorios': '🔌', 'Soportes y Paneles': '🛠️', 'Cámara Foco': '💡',
+}
+
 // ---------- Búsqueda de productos (sin tildes, varias palabras, apodos, código de barras y ficha) ----------
 const quitaTildes = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 
@@ -261,6 +269,9 @@ function App() {
   const [filtroStockAdmin, setFiltroStockAdmin] = useState('todos')
   const [imagenVista, setImagenVista] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('Todos')
+  const [listaCategorias, setListaCategorias] = useState([])
+  const [listaMarcas, setListaMarcas] = useState([])
+  const [mostrarGestorListas, setMostrarGestorListas] = useState(false)
 
   // Estados para Modal de Crear / Editar Producto (Admin)
   const [mostrarModalProductoAdmin, setMostrarModalProductoAdmin] = useState(false)
@@ -408,6 +419,15 @@ function App() {
     const { data: fi } = await supabase.from('productos_ficha')
       .select('producto_id, apodos, codigo_barras, imagen_url, especificaciones')
     if (fi) setFichas(Object.fromEntries(fi.map(f => [f.producto_id, f])))
+
+    // Listas de categorías y marcas (si la tabla aún no existe, se arman con lo que usan los productos)
+    const [{ data: cats }, { data: mars }] = await Promise.all([
+      supabase.from('categorias').select('nombre').order('nombre'),
+      supabase.from('marcas').select('nombre').order('nombre'),
+    ])
+    const usados = (campo) => Array.from(new Set((data ?? []).map(p => p[campo]).filter(Boolean))).sort()
+    setListaCategorias(cats?.length ? cats.map(c => c.nombre) : usados('tipo'))
+    setListaMarcas(mars?.length ? mars.map(m => m.nombre) : usados('marca'))
   }
 
   const cargarClientes = async () => {
@@ -1432,11 +1452,26 @@ function App() {
                 Administrar Tienda Web
               </button>
             </div>
+
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
+              <div>
+                <span className="text-2xl">💼</span>
+                <h2 className="text-lg font-bold text-gray-700 mt-2">Cuentas y Pagos</h2>
+                <p className="text-gray-500 mt-1 text-sm">Alquiler, servicios, sueldos, adelantos y cuentas por pagar a proveedores.</p>
+              </div>
+              <button onClick={() => setVistaAdmin('cuentas')} className="mt-6 w-full bg-amber-100 text-amber-700 hover:bg-amber-200 font-semibold py-2 rounded-lg transition text-sm">
+                Administrar Cuentas
+              </button>
+            </div>
           </div>
         )}
 
         {vistaAdmin === 'web' && (
           <AdminWeb onVolver={() => setVistaAdmin('dashboard')} notificar={notificar} />
+        )}
+
+        {vistaAdmin === 'cuentas' && (
+          <AdminCuentas onVolver={() => setVistaAdmin('dashboard')} notificar={notificar} />
         )}
 
         {/* VISTA DE CUADRE Y RESUMEN DE CAJAS */}
@@ -1890,6 +1925,9 @@ function App() {
                   </p>
                 </div>
                 <div className="flex gap-4 justify-end items-center">
+                  <button onClick={() => setMostrarGestorListas(true)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg transition text-sm">
+                    ⚙️ Categorías y marcas
+                  </button>
                   <button onClick={abrirModalCrear} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm shadow-sm">
                     + Registrar Nuevo Producto
                   </button>
@@ -2075,6 +2113,14 @@ function App() {
           </div>
         )}
 
+        {mostrarGestorListas && (
+          <GestorListas
+            supabase={supabase}
+            onCerrar={() => setMostrarGestorListas(false)}
+            onCambio={cargarProductos}
+          />
+        )}
+
         {/* MODAL DE PRODUCTO */}
         {mostrarModalProductoAdmin && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -2089,19 +2135,24 @@ function App() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Marca</label>
-                  <input type="text" required placeholder="Ej. Dahua, Imou" value={prodMarca} onChange={(e) => setProdMarca(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                  <select required value={prodMarca} onChange={(e) => setProdMarca(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm bg-white">
+                    {(prodMarca && !listaMarcas.includes(prodMarca) ? [prodMarca, ...listaMarcas] : listaMarcas).map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Categoría (Tipo)</label>
                   <select value={prodTipo} onChange={(e) => setProdTipo(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm bg-white">
-                    <option value="Cámaras">Cámaras</option>
-                    <option value="NVR / Grabadores">NVR / Grabadores</option>
-                    <option value="Almacenamiento">Almacenamiento</option>
-                    <option value="Networking">Networking</option>
-                    <option value="Accesorios">Accesorios</option>
-                    <option value="Soportes y Paneles">Soportes y Paneles</option>
-                    <option value="Cámara Foco">Cámara Foco</option>
+                    {(prodTipo && !listaCategorias.includes(prodTipo) ? [prodTipo, ...listaCategorias] : listaCategorias).map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
                   </select>
+                </div>
+                <div className="md:col-span-2 -mt-2 text-right">
+                  <button type="button" onClick={() => setMostrarGestorListas(true)} className="text-xs font-bold text-green-700 hover:underline">
+                    ¿Falta una marca o categoría? Gestionar listas
+                  </button>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Precio de Venta (S/)</label>
@@ -2219,13 +2270,9 @@ function App() {
                   className="px-4 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50 font-medium text-gray-700"
                 >
                   <option value="Todos">📁 Todas las categorías</option>
-                  <option value="Cámaras">📷 Cámaras</option>
-                  <option value="NVR / Grabadores">🖥️ NVR / Grabadores</option>
-                  <option value="Almacenamiento">💾 Almacenamiento (SD)</option>
-                  <option value="Networking">🌐 Networking (Routers)</option>
-                  <option value="Accesorios">🔌 Accesorios</option>
-                  <option value="Soportes y Paneles">🛠️ Soportes y Paneles</option>
-                  <option value="Cámara Foco">💡 Cámara Foco</option>
+                  {listaCategorias.map(c => (
+                    <option key={c} value={c}>{EMOJI_CATEGORIA[c] || '📁'} {c}</option>
+                  ))}
                 </select>
               </div>
 

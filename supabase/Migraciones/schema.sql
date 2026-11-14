@@ -168,6 +168,22 @@ $$;
 revoke all on function public.es_admin() from public, anon;
 grant execute on function public.es_admin() to authenticated;
 
+-- ¿El usuario actual es un empleado registrado en public.usuarios (cualquier rol)?
+-- Evita que alguien que se registre por su cuenta en Supabase Auth lea datos:
+-- estar "autenticado" no basta, hay que figurar en la tabla usuarios.
+-- SECURITY INVOKER: respeta RLS (cada empleado ve su propia fila).
+create or replace function public.es_empleado()
+returns boolean
+language sql
+stable
+set search_path = public
+as $$
+  select exists (select 1 from public.usuarios where id = auth.uid());
+$$;
+
+revoke all on function public.es_empleado() from public, anon;
+grant execute on function public.es_empleado() to authenticated;
+
 
 -- =============================================================================
 -- 4. TRIGGERS DE PROTECCIÓN
@@ -180,6 +196,7 @@ grant execute on function public.es_admin() to authenticated;
 create or replace function public.proteger_usuarios()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   if auth.uid() is null or public.es_admin() then
@@ -208,6 +225,7 @@ create trigger trg_proteger_usuarios
 create or replace function public.proteger_productos()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   if auth.uid() is null or public.es_admin() then
@@ -269,14 +287,14 @@ create policy usuarios_update on public.usuarios for update to authenticated
   with check (id = auth.uid() or public.es_admin());
 
 -- ---- clientes --------------------------------------------------------------
--- Todos los usuarios con sesión leen y registran clientes; solo el admin edita o borra.
+-- Los empleados leen y registran clientes; solo el admin edita o borra.
 drop policy if exists clientes_select on public.clientes;
 create policy clientes_select on public.clientes for select to authenticated
-  using (true);
+  using (public.es_empleado());
 
 drop policy if exists clientes_insert on public.clientes;
 create policy clientes_insert on public.clientes for insert to authenticated
-  with check (true);
+  with check (public.es_empleado());
 
 drop policy if exists clientes_update on public.clientes;
 create policy clientes_update on public.clientes for update to authenticated
@@ -287,11 +305,11 @@ create policy clientes_delete on public.clientes for delete to authenticated
   using (public.es_admin());
 
 -- ---- productos -------------------------------------------------------------
--- Todos leen. Solo el admin crea y borra. La actualización la ve todo usuario
--- (el cajero descuenta stock) pero el trigger limita al cajero a la columna stock.
+-- Los empleados leen. Solo el admin crea y borra. La actualización la hacen los
+-- empleados (el cajero descuenta stock) pero el trigger limita al cajero a la columna stock.
 drop policy if exists productos_select on public.productos;
 create policy productos_select on public.productos for select to authenticated
-  using (true);
+  using (public.es_empleado());
 
 drop policy if exists productos_insert on public.productos;
 create policy productos_insert on public.productos for insert to authenticated
@@ -299,7 +317,7 @@ create policy productos_insert on public.productos for insert to authenticated
 
 drop policy if exists productos_update on public.productos;
 create policy productos_update on public.productos for update to authenticated
-  using (true) with check (true);
+  using (public.es_empleado()) with check (public.es_empleado());
 
 drop policy if exists productos_delete on public.productos;
 create policy productos_delete on public.productos for delete to authenticated

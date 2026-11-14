@@ -186,7 +186,7 @@ La base de datos aplica **Row Level Security** en todas las tablas, por lo que l
 | `retiros_caja` | Solo lectura de los de sus turnos | Registra y ve todos |
 
 Además:
-- Sin sesión iniciada no se puede leer ninguna tabla.
+- Sin sesión iniciada no se puede leer ninguna tabla, y una cuenta que no esté registrada como empleado en `usuarios` tampoco ve nada.
 - Las ventas no se pueden editar ni borrar desde la API.
 - Cuando un cajero pide autorización de un administrador (descuentos y retiros), las credenciales se validan con un cliente de Supabase aparte y sin persistencia, de modo que **la sesión del cajero no se reemplaza**.
 

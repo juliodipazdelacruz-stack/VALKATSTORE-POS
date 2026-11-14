@@ -4,6 +4,7 @@ import { supabase } from './supabase'
 import SpecsEditor, { cargarFicha, guardarFicha } from './SpecsEditor'
 import EscanerCodigo from './EscanerCodigo'
 import SelectorImagen, { subirImagen } from './SelectorImagen'
+import AdminWeb from './AdminWeb'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -154,6 +155,49 @@ const calcularCajaTurno = async (cliente, turno) => {
   return { ventasEfectivo, retiros, disponible: Number(turno.monto_apertura) + ventasEfectivo - retiros }
 }
 
+// ---------- Búsqueda de productos (sin tildes, varias palabras, apodos, código de barras y ficha) ----------
+const quitaTildes = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+function buscarProductos(lista, fichas, texto) {
+  const tokens = quitaTildes(texto).split(/[\s,]+/).filter(Boolean)
+  if (!tokens.length) return lista
+  const res = []
+  for (const p of lista) {
+    const f = fichas[p.id]
+    const specs = f?.especificaciones ? Object.entries(f.especificaciones).map(([k, v]) => `${k} ${v}`).join(' ') : ''
+    const principal = quitaTildes(`${p.nombre} ${p.marca || ''}`)
+    const otros = quitaTildes(`${p.tipo || ''} ${f?.apodos || ''} ${f?.codigo_barras || ''} ${specs}`)
+    let puntos = 0, ok = true
+    for (const t of tokens) {
+      if (principal.includes(t)) puntos += (principal.startsWith(t) || principal.includes(' ' + t)) ? 3 : 2
+      else if (otros.includes(t)) puntos += 1
+      else { ok = false; break }
+    }
+    if (ok) res.push({ p, puntos })
+  }
+  return res.sort((a, b) => b.puntos - a.puntos).map(x => x.p)
+}
+
+// Miniatura del producto: muestra la foto o un recuadro punteado si aún no tiene imagen
+function MiniFoto({ url, nombre, tam = 'w-12 h-12', onClick }) {
+  if (!url) {
+    return (
+      <div className="shrink-0 flex flex-col items-center gap-0.5" title="Este producto aún no tiene imagen">
+        <div className={`${tam} rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-gray-300 text-lg`}>📷</div>
+      </div>
+    )
+  }
+  const img = <img src={url} alt={nombre} loading="lazy" className={`${tam} rounded-lg border border-gray-200 object-cover bg-white`} />
+  return (
+    <div className="relative shrink-0">
+      {onClick
+        ? <button type="button" onClick={onClick} title="Ver imagen" className="block hover:ring-2 hover:ring-green-500 rounded-lg transition">{img}</button>
+        : img}
+      <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-green-500 text-white text-[10px] leading-4 text-center border-2 border-white" aria-hidden="true">✓</span>
+    </div>
+  )
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [rol, setRol] = useState(null)
@@ -211,6 +255,11 @@ function App() {
   // Búsqueda y Filtros
   const [busqueda, setBusqueda] = useState('')
   const [busquedaAdmin, setBusquedaAdmin] = useState('')
+  const [fichas, setFichas] = useState({})
+  const [filtroTipoAdmin, setFiltroTipoAdmin] = useState('Todos')
+  const [filtroImagen, setFiltroImagen] = useState('todos')
+  const [filtroStockAdmin, setFiltroStockAdmin] = useState('todos')
+  const [imagenVista, setImagenVista] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('Todos')
 
   // Estados para Modal de Crear / Editar Producto (Admin)
@@ -356,6 +405,9 @@ function App() {
       setProductos(data)
       setListaProductosAdmin(data)
     }
+    const { data: fi } = await supabase.from('productos_ficha')
+      .select('producto_id, apodos, codigo_barras, imagen_url, especificaciones')
+    if (fi) setFichas(Object.fromEntries(fi.map(f => [f.producto_id, f])))
   }
 
   const cargarClientes = async () => {
@@ -844,12 +896,18 @@ function App() {
     return total > 0 ? total.toFixed(2) : '0.00'
   }
 
-  const productosFiltrados = productos.filter(p => {
-    const coincideBusqueda = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || 
-                             p.marca.toLowerCase().includes(busqueda.toLowerCase())
-    const coincideTipo = filtroTipo === 'Todos' || p.tipo === filtroTipo
-    return coincideBusqueda && coincideTipo
-  })
+  const productosFiltrados = buscarProductos(
+    productos.filter(p => filtroTipo === 'Todos' || p.tipo === filtroTipo), fichas, busqueda)
+
+  // Enter en el buscador del POS: agrega el producto si el código de barras coincide o si hay una sola coincidencia
+  const alBuscarEnter = (e) => {
+    if (e.key !== 'Enter') return
+    const q = busqueda.trim()
+    if (!q) return
+    const exacto = productos.find(p => (fichas[p.id]?.codigo_barras || '') === q)
+    const elegido = exacto || (productosFiltrados.length === 1 ? productosFiltrados[0] : null)
+    if (elegido) { agregarAlCarrito(elegido); setBusqueda('') }
+  }
 
   const clientesFiltrados = clientes.filter(c => {
     const q = busquedaCliente.toLowerCase().trim()
@@ -948,10 +1006,16 @@ function App() {
     notificar('Cliente registrado y asignado a la venta.', 'exito')
   }
 
-  const productosAdminFiltrados = listaProductosAdmin.filter(p => {
-    return p.nombre.toLowerCase().includes(busquedaAdmin.toLowerCase()) || 
-           p.marca.toLowerCase().includes(busquedaAdmin.toLowerCase())
-  })
+  const productosAdminFiltrados = buscarProductos(
+    listaProductosAdmin.filter(p =>
+      (filtroTipoAdmin === 'Todos' || p.tipo === filtroTipoAdmin) &&
+      (filtroImagen === 'todos' || (filtroImagen === 'con') === !!fichas[p.id]?.imagen_url) &&
+      (filtroStockAdmin === 'todos' || (filtroStockAdmin === 'agotado' ? p.stock <= 0 : (p.stock > 0 && p.stock < 5)))),
+    fichas, busquedaAdmin)
+  const sinImagenCount = listaProductosAdmin.filter(p => !fichas[p.id]?.imagen_url).length
+  const tiposAdmin = ['Todos', ...Array.from(new Set(listaProductosAdmin.map(p => p.tipo).filter(Boolean)))]
+  const hayFiltrosAdmin = busquedaAdmin || filtroTipoAdmin !== 'Todos' || filtroImagen !== 'todos' || filtroStockAdmin !== 'todos'
+  const limpiarFiltrosAdmin = () => { setBusquedaAdmin(''); setFiltroTipoAdmin('Todos'); setFiltroImagen('todos'); setFiltroStockAdmin('todos') }
 
   const procesarCobro = () => {
     const desc = parseFloat(descuentoMonto) || 0
@@ -1357,7 +1421,22 @@ function App() {
                 Abrir Gestión de Usuarios
               </button>
             </div>
+
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
+              <div>
+                <span className="text-2xl">🌐</span>
+                <h2 className="text-lg font-bold text-gray-700 mt-2">Tienda Web</h2>
+                <p className="text-gray-500 mt-1 text-sm">Productos en la web, promoción de memorias y live de TikTok.</p>
+              </div>
+              <button onClick={() => setVistaAdmin('web')} className="mt-6 w-full bg-teal-100 text-teal-700 hover:bg-teal-200 font-semibold py-2 rounded-lg transition text-sm">
+                Administrar Tienda Web
+              </button>
+            </div>
           </div>
+        )}
+
+        {vistaAdmin === 'web' && (
+          <AdminWeb onVolver={() => setVistaAdmin('dashboard')} notificar={notificar} />
         )}
 
         {/* VISTA DE CUADRE Y RESUMEN DE CAJAS */}
@@ -1801,30 +1880,57 @@ function App() {
         {/* VISTA DE PRODUCTOS (SOLO ADMIN) */}
         {vistaAdmin === 'productos' && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50">
-              <h2 className="text-xl font-bold text-gray-800">Inventario Global</h2>
-
-              <div className="w-full md:w-72">
-                <input 
-                  type="text" placeholder="🔍 Buscar producto a editar..." 
-                  value={busquedaAdmin} onChange={(e) => setBusquedaAdmin(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
-                />
+            <div className="p-6 border-b border-gray-200 bg-gray-50 space-y-4">
+              <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Inventario Global</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {productosAdminFiltrados.length} de {listaProductosAdmin.length} productos
+                    {sinImagenCount > 0 && <> · <span className="text-amber-600 font-semibold">{sinImagenCount} sin imagen</span></>}
+                  </p>
+                </div>
+                <div className="flex gap-4 justify-end items-center">
+                  <button onClick={abrirModalCrear} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm shadow-sm">
+                    + Registrar Nuevo Producto
+                  </button>
+                  <button onClick={() => setVistaAdmin('dashboard')} className="text-gray-500 hover:text-gray-800 font-medium text-sm">← Volver</button>
+                </div>
               </div>
 
-              <div className="flex gap-4 w-full md:w-auto justify-end">
-                <button onClick={abrirModalCrear} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm shadow-sm">
-                  + Registrar Nuevo Producto
-                </button>
-                <button onClick={() => setVistaAdmin('dashboard')} className="text-gray-500 hover:text-gray-800 font-medium text-sm">← Volver</button>
+              <div className="flex flex-col lg:flex-row gap-3">
+                <div className="relative flex-1">
+                  <input
+                    type="text" placeholder="🔍 Buscar por nombre, marca, apodo, código de barras o ficha técnica…"
+                    value={busquedaAdmin} onChange={(e) => setBusquedaAdmin(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && productosAdminFiltrados.length === 1) abrirModalEditar(productosAdminFiltrados[0]) }}
+                    className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                  />
+                  {busquedaAdmin && (
+                    <button onClick={() => setBusquedaAdmin('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">✕</button>
+                  )}
+                </div>
+                <select value={filtroTipoAdmin} onChange={(e) => setFiltroTipoAdmin(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                  {tiposAdmin.map(t => <option key={t} value={t}>{t === 'Todos' ? '📁 Todas las categorías' : t}</option>)}
+                </select>
+                <select value={filtroImagen} onChange={(e) => setFiltroImagen(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                  <option value="todos">🖼️ Con y sin imagen</option>
+                  <option value="con">✓ Con imagen</option>
+                  <option value="sin">📷 Sin imagen</option>
+                </select>
+                <select value={filtroStockAdmin} onChange={(e) => setFiltroStockAdmin(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                  <option value="todos">📦 Todo el stock</option>
+                  <option value="bajo">⚠ Stock bajo (menos de 5)</option>
+                  <option value="agotado">⛔ Agotado</option>
+                </select>
               </div>
             </div>
 
-            <div className="overflow-x-auto max-h-[500px]">
+            <div className="overflow-x-auto max-h-[560px]">
               <table className="w-full text-left">
-                <thead className="bg-gray-50 text-gray-600 text-sm sticky top-0">
+                <thead className="bg-gray-50 text-gray-600 text-sm sticky top-0 z-10 shadow-sm">
                   <tr>
-                    <th className="p-4 font-semibold">Nombre</th>
+                    <th className="p-4 font-semibold w-24">Imagen</th>
+                    <th className="p-4 font-semibold">Producto</th>
                     <th className="p-4 font-semibold">Marca</th>
                     <th className="p-4 font-semibold">Categoría</th>
                     <th className="p-4 font-semibold">Precio (S/)</th>
@@ -1833,29 +1939,62 @@ function App() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                  {productosAdminFiltrados.map((prod) => (
-                    <tr key={prod.id} className="hover:bg-gray-50 transition">
-                      <td className="p-4 font-medium text-gray-800">{prod.nombre}</td>
-                      <td className="p-4 text-blue-600 font-semibold">{prod.marca}</td>
-                      <td className="p-4 text-gray-500">{prod.tipo}</td>
-                      <td className="p-4 font-bold text-green-700">S/ {prod.precio.toFixed(2)}</td>
-                      <td className="p-4 text-gray-700">{prod.stock} unids.</td>
-                      <td className="p-4 text-center">
-                        <button 
-                          onClick={() => abrirModalEditar(prod)}
-                          className="bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold px-3 py-1.5 rounded-lg text-xs transition"
-                        >
-                          ✏️ Editar
-                        </button>
+                  {productosAdminFiltrados.map((prod) => {
+                    const f = fichas[prod.id]
+                    return (
+                      <tr key={prod.id} className="hover:bg-gray-50 transition">
+                        <td className="p-3">
+                          <div className="flex flex-col items-start gap-1">
+                            <MiniFoto url={f?.imagen_url} nombre={prod.nombre} tam="w-14 h-14" onClick={() => setImagenVista({ url: f.imagen_url, nombre: prod.nombre })} />
+                            {!f?.imagen_url && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">Sin imagen</span>}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <p className="font-medium text-gray-800">{prod.nombre}</p>
+                          {f?.apodos && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{f.apodos}</p>}
+                        </td>
+                        <td className="p-4 text-blue-600 font-semibold">{prod.marca}</td>
+                        <td className="p-4 text-gray-500">{prod.tipo}</td>
+                        <td className="p-4 font-bold text-green-700">S/ {prod.precio.toFixed(2)}</td>
+                        <td className="p-4">
+                          {prod.stock <= 0
+                            ? <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-1 rounded-full">Agotado</span>
+                            : prod.stock < 5
+                              ? <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Bajo · {prod.stock}</span>
+                              : <span className="text-gray-700">{prod.stock} unids.</span>}
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => abrirModalEditar(prod)}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold px-3 py-1.5 rounded-lg text-xs transition"
+                          >
+                            ✏️ Editar
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {productosAdminFiltrados.length === 0 && (
+                    <tr>
+                      <td colSpan="7" className="p-8 text-center text-gray-400">
+                        No se encontraron productos con esos filtros.
+                        {hayFiltrosAdmin && <button onClick={limpiarFiltrosAdmin} className="ml-2 text-blue-600 font-semibold underline">Limpiar filtros</button>}
                       </td>
                     </tr>
-                  ))}
-                  {productosAdminFiltrados.length === 0 && (
-                    <tr><td colSpan="6" className="p-6 text-center text-gray-400">No se encontraron productos en la búsqueda.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
+
+            {imagenVista && (
+              <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setImagenVista(null)}>
+                <div className="bg-white rounded-2xl p-3 max-w-xl w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                  <img src={imagenVista.url} alt={imagenVista.nombre} className="w-full max-h-[70vh] object-contain rounded-xl bg-gray-50" />
+                  <p className="text-center text-sm font-semibold text-gray-800 mt-3">{imagenVista.nombre}</p>
+                  <button onClick={() => setImagenVista(null)} className="mt-2 w-full py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm font-bold text-gray-700">Cerrar</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2065,11 +2204,16 @@ function App() {
 
               {/* BARRA DE BÚSQUEDA Y FILTROS */}
               <div className="flex flex-col md:flex-row gap-3 mb-4">
-                <input 
-                  type="text" placeholder="🔍 Buscar por nombre de cámara o marca..." 
-                  value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50"
-                />
+                <div className="relative flex-1">
+                  <input 
+                    type="text" placeholder="🔍 Buscar por nombre, marca, apodo o escanear código de barras…" 
+                    value={busqueda} onChange={(e) => setBusqueda(e.target.value)} onKeyDown={alBuscarEnter}
+                    className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50"
+                  />
+                  {busqueda && (
+                    <button onClick={() => setBusqueda('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">✕</button>
+                  )}
+                </div>
                 <select 
                   value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}
                   className="px-4 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50 font-medium text-gray-700"
@@ -2086,18 +2230,25 @@ function App() {
               </div>
 
               {/* GRILLA DE PRODUCTOS */}
+              <p className="text-xs text-gray-400 mb-2">
+                {productosFiltrados.length} producto{productosFiltrados.length === 1 ? '' : 's'}
+                {busqueda.trim() && ' · Enter agrega el producto si hay una sola coincidencia'}
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[450px] overflow-y-auto pr-2">
                 {productosFiltrados.map(prod => (
-                  <div key={prod.id} className="border border-gray-200 p-4 rounded-xl flex flex-col justify-between hover:shadow-md transition">
-                    <div>
-                      <div className="flex justify-between items-start">
-                        <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{prod.marca}</span>
-                        <span className={`text-xs font-bold ${prod.stock < 5 ? 'text-red-500' : 'text-gray-400'}`}>Stock: {prod.stock}</span>
+                  <div key={prod.id} className="border border-gray-200 p-3 rounded-xl flex flex-col justify-between hover:shadow-md transition">
+                    <div className="flex gap-3">
+                      <MiniFoto url={fichas[prod.id]?.imagen_url} nombre={prod.nombre} tam="w-16 h-16" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{prod.marca}</span>
+                          <span className={`text-xs font-bold ${prod.stock < 5 ? 'text-red-500' : 'text-gray-400'}`}>Stock: {prod.stock}</span>
+                        </div>
+                        <h4 className="font-bold text-gray-800 mt-1.5 text-sm leading-snug">{prod.nombre}</h4>
+                        <p className="text-xs text-gray-500">{prod.tipo}</p>
                       </div>
-                      <h4 className="font-bold text-gray-800 mt-2 text-sm">{prod.nombre}</h4>
-                      <p className="text-xs text-gray-500">{prod.tipo}</p>
                     </div>
-                    <div className="flex justify-between items-center mt-4 pt-3 border-t">
+                    <div className="flex justify-between items-center mt-3 pt-3 border-t">
                       <span className="font-extrabold text-green-700">S/ {prod.precio.toFixed(2)}</span>
                       <button 
                         onClick={() => agregarAlCarrito(prod)}

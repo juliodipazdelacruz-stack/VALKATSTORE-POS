@@ -139,6 +139,7 @@ const resumirTopProductos = (filas) => {
 }
 
 const claseInputModal = 'w-full px-3.5 py-2.5 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition'
+const claseSelectFiltro = 'px-3 py-2 border border-zinc-200 rounded-lg text-sm bg-white text-zinc-700 font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition'
 const claseCampo = 'w-full px-3.5 py-2.5 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition'
 
 // Efectivo que realmente entró a la caja física con estas ventas
@@ -281,6 +282,8 @@ function App() {
   const [busquedaAdmin, setBusquedaAdmin] = useState('')
   const [fichas, setFichas] = useState({})
   const [filtroTipoAdmin, setFiltroTipoAdmin] = useState('Todos')
+  const [filtroMarcaAdmin, setFiltroMarcaAdmin] = useState('Todos')
+  const [filtroMarca, setFiltroMarca] = useState('Todos')
   const [filtroStockAdmin, setFiltroStockAdmin] = useState('todos')
   const [imagenVista, setImagenVista] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('Todos')
@@ -953,7 +956,8 @@ function App() {
   }
 
   const productosFiltrados = buscarProductos(
-    productos.filter(p => filtroTipo === 'Todos' || p.tipo === filtroTipo), fichas, busqueda)
+    productos.filter(p => (filtroTipo === 'Todos' || p.tipo === filtroTipo) && (filtroMarca === 'Todos' || p.marca === filtroMarca)), fichas, busqueda)
+  const marcasCaja = Array.from(new Set(productos.map(p => p.marca).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 
   // Enter en el buscador del POS: agrega el producto si el código de barras coincide o si hay una sola coincidencia
   const alBuscarEnter = (e) => {
@@ -1065,12 +1069,15 @@ function App() {
   const productosAdminFiltrados = buscarProductos(
     listaProductosAdmin.filter(p =>
       (filtroTipoAdmin === 'Todos' || p.tipo === filtroTipoAdmin) &&
+      (filtroMarcaAdmin === 'Todos' || p.marca === filtroMarcaAdmin) &&
       (filtroStockAdmin === 'todos' || (filtroStockAdmin === 'agotado' ? p.stock <= 0 : (p.stock > 0 && p.stock < 5)))),
     fichas, busquedaAdmin)
   const tiposAdmin = ['Todos', ...Array.from(new Set(listaProductosAdmin.map(p => p.tipo).filter(Boolean)))]
   const conteoTiposAdmin = listaProductosAdmin.reduce((acc, p) => { if (p.tipo) acc[p.tipo] = (acc[p.tipo] || 0) + 1; return acc }, {})
-  const hayFiltrosAdmin = busquedaAdmin || filtroTipoAdmin !== 'Todos' || filtroStockAdmin !== 'todos'
-  const limpiarFiltrosAdmin = () => { setBusquedaAdmin(''); setFiltroTipoAdmin('Todos'); setFiltroStockAdmin('todos') }
+  const marcasAdmin = Array.from(new Set(listaProductosAdmin.map(p => p.marca).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  const conteoMarcasAdmin = listaProductosAdmin.reduce((acc, p) => { if (p.marca) acc[p.marca] = (acc[p.marca] || 0) + 1; return acc }, {})
+  const hayFiltrosAdmin = busquedaAdmin || filtroTipoAdmin !== 'Todos' || filtroMarcaAdmin !== 'Todos' || filtroStockAdmin !== 'todos'
+  const limpiarFiltrosAdmin = () => { setBusquedaAdmin(''); setFiltroTipoAdmin('Todos'); setFiltroMarcaAdmin('Todos'); setFiltroStockAdmin('todos') }
 
   const modulosAdmin = [
     { vista: 'dashboard', icono: LayoutDashboard, titulo: 'Resumen', ir: () => setVistaAdmin('dashboard') },
@@ -2115,29 +2122,23 @@ function App() {
                     <button onClick={() => setBusquedaAdmin('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
                   )}
                 </div>
-                <select value={filtroStockAdmin} onChange={(e) => setFiltroStockAdmin(e.target.value)} className="px-3 py-2 border border-zinc-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400">
+                <select value={filtroTipoAdmin} onChange={(e) => setFiltroTipoAdmin(e.target.value)} aria-label="Filtrar por categoría" className={claseSelectFiltro}>
+                  <option value="Todos">Todas las categorías ({listaProductosAdmin.length})</option>
+                  {tiposAdmin.filter(t => t !== 'Todos').map(t => (
+                    <option key={t} value={t}>{t} ({conteoTiposAdmin[t] || 0})</option>
+                  ))}
+                </select>
+                <select value={filtroMarcaAdmin} onChange={(e) => setFiltroMarcaAdmin(e.target.value)} aria-label="Filtrar por marca" className={claseSelectFiltro}>
+                  <option value="Todos">Todas las marcas</option>
+                  {marcasAdmin.map(m => (
+                    <option key={m} value={m}>{m} ({conteoMarcasAdmin[m] || 0})</option>
+                  ))}
+                </select>
+                <select value={filtroStockAdmin} onChange={(e) => setFiltroStockAdmin(e.target.value)} aria-label="Filtrar por stock" className={claseSelectFiltro}>
                   <option value="todos">Todo el stock</option>
                   <option value="bajo">Stock bajo (menos de 5)</option>
                   <option value="agotado">Agotado</option>
                 </select>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-zinc-500 mr-1">Categoría:</span>
-                {tiposAdmin.map(t => {
-                  const activo = filtroTipoAdmin === t
-                  const n = t === 'Todos' ? listaProductosAdmin.length : (conteoTiposAdmin[t] || 0)
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setFiltroTipoAdmin(t)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${activo ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm' : 'bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-100'}`}
-                    >
-                      {t === 'Todos' ? 'Todas' : t} <span className={activo ? 'text-emerald-100' : 'text-zinc-400'}>({n})</span>
-                    </button>
-                  )
-                })}
               </div>
             </div>
 
@@ -2461,13 +2462,16 @@ function App() {
                     <button onClick={() => setBusqueda('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
                   )}
                 </div>
-                <select 
-                  value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}
-                  className="px-4 py-2 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 bg-zinc-50 font-medium text-zinc-700"
-                >
+                <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} aria-label="Filtrar por categoría" className={claseSelectFiltro}>
                   <option value="Todos">Todas las categorías</option>
                   {listaCategorias.map(c => (
                     <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <select value={filtroMarca} onChange={(e) => setFiltroMarca(e.target.value)} aria-label="Filtrar por marca" className={claseSelectFiltro}>
+                  <option value="Todos">Todas las marcas</option>
+                  {marcasCaja.map(m => (
+                    <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
               </div>

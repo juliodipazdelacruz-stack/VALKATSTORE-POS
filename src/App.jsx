@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { LogOut, Lock, LayoutDashboard, Wallet, BarChart3, Package, Users, Globe, Briefcase, Search, X, ShoppingCart, UserRound, ArrowDownToLine, Plus, CheckCircle2, XCircle, AlertTriangle, PartyPopper, SearchCheck, Coins, LockKeyhole, Sun, Moon, ReceiptText, TrendingUp, Flame, Snowflake, Settings2, Pencil, Eye, CreditCard, Calculator, ShieldCheck, Landmark } from 'lucide-react'
 import { supabase } from './supabase'
 import SpecsEditor, { cargarFicha, guardarFicha } from './SpecsEditor'
 import EscanerCodigo from './EscanerCodigo'
@@ -7,6 +8,9 @@ import SelectorImagen, { subirImagen } from './SelectorImagen'
 import AdminWeb from './AdminWeb'
 import AdminCuentas from './AdminCuentas'
 import GestorListas from './GestorListas'
+import StockLocales from './StockLocales'
+import TrasladosPorRecibir from './TrasladosPorRecibir'
+import './dark.css'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -134,7 +138,8 @@ const resumirTopProductos = (filas) => {
   }
 }
 
-const claseInputModal = 'w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+const claseInputModal = 'w-full px-3.5 py-2.5 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition'
+const claseCampo = 'w-full px-3.5 py-2.5 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition'
 
 // Efectivo que realmente entró a la caja física con estas ventas
 const efectivoDeVentas = (filas) => (filas || []).reduce((acc, v) => acc + (
@@ -191,23 +196,34 @@ function MiniFoto({ url, nombre, tam = 'w-12 h-12', onClick }) {
   if (!url) {
     return (
       <div className="shrink-0 flex flex-col items-center gap-0.5" title="Este producto aún no tiene imagen">
-        <div className={`${tam} rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-gray-300 text-lg`}>📷</div>
+        <div className={`${tam} rounded-lg border-2 border-dashed border-zinc-200 bg-zinc-50 flex items-center justify-center text-zinc-300 text-lg`}>📷</div>
       </div>
     )
   }
-  const img = <img src={url} alt={nombre} loading="lazy" className={`${tam} rounded-lg border border-gray-200 object-cover bg-white`} />
+  const img = <img src={url} alt={nombre} loading="lazy" className={`${tam} rounded-lg border border-zinc-200 object-cover bg-white`} />
   return (
     <div className="relative shrink-0">
       {onClick
-        ? <button type="button" onClick={onClick} title="Ver imagen" className="block hover:ring-2 hover:ring-green-500 rounded-lg transition">{img}</button>
+        ? <button type="button" onClick={onClick} title="Ver imagen" className="block hover:ring-2 hover:ring-emerald-500 rounded-lg transition">{img}</button>
         : img}
-      <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-green-500 text-white text-[10px] leading-4 text-center border-2 border-white" aria-hidden="true">✓</span>
+      <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] leading-4 text-center border-2 border-white" aria-hidden="true">✓</span>
     </div>
   )
 }
 
 function App() {
   const [session, setSession] = useState(null)
+  const [tema, setTema] = useState(() => {
+    try { return localStorage.getItem('valkat-tema') === 'dark' ? 'dark' : 'light' } catch { return 'light' }
+  })
+  const [modoRecuperacion, setModoRecuperacion] = useState(false)
+  const [olvideClave, setOlvideClave] = useState(false)
+  const [correoEnviado, setCorreoEnviado] = useState(false)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', tema === 'dark')
+    try { localStorage.setItem('valkat-tema', tema) } catch { /* sin almacenamiento */ }
+  }, [tema])
   const [rol, setRol] = useState(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -265,13 +281,13 @@ function App() {
   const [busquedaAdmin, setBusquedaAdmin] = useState('')
   const [fichas, setFichas] = useState({})
   const [filtroTipoAdmin, setFiltroTipoAdmin] = useState('Todos')
-  const [filtroImagen, setFiltroImagen] = useState('todos')
   const [filtroStockAdmin, setFiltroStockAdmin] = useState('todos')
   const [imagenVista, setImagenVista] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('Todos')
   const [listaCategorias, setListaCategorias] = useState([])
   const [listaMarcas, setListaMarcas] = useState([])
   const [mostrarGestorListas, setMostrarGestorListas] = useState(false)
+  const [mostrarStockLocales, setMostrarStockLocales] = useState(false)
 
   // Estados para Modal de Crear / Editar Producto (Admin)
   const [mostrarModalProductoAdmin, setMostrarModalProductoAdmin] = useState(false)
@@ -322,6 +338,15 @@ function App() {
     return () => clearTimeout(t)
   }, [toast])
 
+  // Al abrir el resumen del admin se cargan productos y ventas del rango activo
+  useEffect(() => {
+    if (rol === 'admin' && vistaAdmin === 'dashboard') {
+      cargarProductos()
+      cargarReporteVentas(rangoReporte)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rol, vistaAdmin])
+
   // Reemplazo de alert(): el tipo se deduce del texto si no se indica
   const notificar = (mensaje, tipo) => {
     const t = tipo || (/éxito|autorizado/i.test(mensaje) ? 'exito' : /error|incorrect/i.test(mensaje) ? 'error' : 'aviso')
@@ -350,6 +375,7 @@ function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return
+      if (_event === 'PASSWORD_RECOVERY') setModoRecuperacion(true)
       setSession(session)
       if (session) {
         obtenerRolUsuario(session.user.id)
@@ -665,6 +691,15 @@ function App() {
     setCargando(false)
   }
 
+  const manejarRecuperar = async (e) => {
+    e.preventDefault()
+    setCargando(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+    setCargando(false)
+    if (error) return notificar('No se pudo enviar el correo: ' + error.message, 'error')
+    setCorreoEnviado(true)
+  }
+
   const cerrarSesion = async () => {
     await supabase.auth.signOut()
     setRol(null)
@@ -687,6 +722,7 @@ function App() {
       return
     }
 
+    setModoRecuperacion(false)
     const { error: errorDb } = await supabase.from('usuarios').update({ debe_cambiar_password: false }).eq('id', session.user.id)
     if (!errorDb) {
       setDebeCambiarPassword(false)
@@ -1029,13 +1065,35 @@ function App() {
   const productosAdminFiltrados = buscarProductos(
     listaProductosAdmin.filter(p =>
       (filtroTipoAdmin === 'Todos' || p.tipo === filtroTipoAdmin) &&
-      (filtroImagen === 'todos' || (filtroImagen === 'con') === !!fichas[p.id]?.imagen_url) &&
       (filtroStockAdmin === 'todos' || (filtroStockAdmin === 'agotado' ? p.stock <= 0 : (p.stock > 0 && p.stock < 5)))),
     fichas, busquedaAdmin)
-  const sinImagenCount = listaProductosAdmin.filter(p => !fichas[p.id]?.imagen_url).length
   const tiposAdmin = ['Todos', ...Array.from(new Set(listaProductosAdmin.map(p => p.tipo).filter(Boolean)))]
-  const hayFiltrosAdmin = busquedaAdmin || filtroTipoAdmin !== 'Todos' || filtroImagen !== 'todos' || filtroStockAdmin !== 'todos'
-  const limpiarFiltrosAdmin = () => { setBusquedaAdmin(''); setFiltroTipoAdmin('Todos'); setFiltroImagen('todos'); setFiltroStockAdmin('todos') }
+  const conteoTiposAdmin = listaProductosAdmin.reduce((acc, p) => { if (p.tipo) acc[p.tipo] = (acc[p.tipo] || 0) + 1; return acc }, {})
+  const hayFiltrosAdmin = busquedaAdmin || filtroTipoAdmin !== 'Todos' || filtroStockAdmin !== 'todos'
+  const limpiarFiltrosAdmin = () => { setBusquedaAdmin(''); setFiltroTipoAdmin('Todos'); setFiltroStockAdmin('todos') }
+
+  const modulosAdmin = [
+    { vista: 'dashboard', icono: LayoutDashboard, titulo: 'Resumen', ir: () => setVistaAdmin('dashboard') },
+    { vista: 'cuadre', icono: Wallet, titulo: 'Cuadre de caja', ir: () => { setVistaAdmin('cuadre'); cargarTurnosAdmin() } },
+    { vista: 'reportes', icono: BarChart3, titulo: 'Reportes y analítica', ir: () => { setVistaAdmin('reportes'); cargarProductos(); cargarReporteVentas(rangoReporte) } },
+    { vista: 'productos', icono: Package, titulo: 'Inventario', ir: () => { setVistaAdmin('productos'); cargarProductos() } },
+    { vista: 'usuarios', icono: Users, titulo: 'Usuarios', ir: () => { setVistaAdmin('usuarios'); cargarUsuarios() } },
+    { vista: 'web', icono: Globe, titulo: 'Tienda web', ir: () => setVistaAdmin('web') },
+    { vista: 'cuentas', icono: Briefcase, titulo: 'Cuentas y pagos', ir: () => setVistaAdmin('cuentas') }
+  ]
+
+  // Indicadores del resumen (inventario)
+  const kpiInventario = listaProductosAdmin.reduce((acc, p) => {
+    const st = Number(p.stock) || 0
+    acc.valor += st * Number(p.precio || 0)
+    if (st <= 0) acc.agotados++
+    else if (st < 5) acc.bajos++
+    return acc
+  }, { valor: 0, agotados: 0, bajos: 0 })
+  const alertasStock = listaProductosAdmin
+    .filter(p => (Number(p.stock) || 0) < 5)
+    .sort((a, b) => (Number(a.stock) || 0) - (Number(b.stock) || 0))
+    .slice(0, 6)
 
   const procesarCobro = () => {
     const desc = parseFloat(descuentoMonto) || 0
@@ -1068,47 +1126,22 @@ function App() {
     setCargando(true)
 
     try {
-      // 1. Insertar la venta principal
-      const { data: ventaData, error: ventaError } = await supabase
-        .from('ventas')
-        .insert([{
-          caja_turno_id: turnoAbierto.id,
-          usuario_id: session.user.id,
-          cliente_id: clienteSeleccionado?.id || null,
-          total: totalPagar,
-          monto_efectivo: efectivoVenta,
-          medio_pago: metodoPago
-        }])
-        .select()
-        .single()
+      // Venta + detalle + descuento de stock en UNA sola operación en la base:
+      // si algo falla (por ejemplo, stock insuficiente) no queda nada a medias.
+      const { error: ventaError } = await supabase.rpc('registrar_venta', {
+        p_turno_id: turnoAbierto.id,
+        p_cliente_id: clienteSeleccionado?.id || null,
+        p_total: totalPagar,
+        p_monto_efectivo: efectivoVenta,
+        p_medio_pago: metodoPago,
+        p_items: carrito.map(item => ({
+          producto_id: item.id,
+          cantidad: item.cantidad,
+          precio: item.precio
+        }))
+      })
 
       if (ventaError) throw ventaError
-
-      // 2. Insertar cada detalle de venta y restar stock en la tabla productos
-      for (const item of carrito) {
-        const subtotalItem = item.precio * item.cantidad
-
-        const { error: detalleError } = await supabase
-          .from('detalle_ventas')
-          .insert([{
-            venta_id: ventaData.id,
-            producto_id: item.id,
-            cantidad: item.cantidad,
-            precio_unitario: item.precio,
-            subtotal: subtotalItem
-          }])
-
-        if (detalleError) throw detalleError
-
-        // Actualizar el stock restando la cantidad vendida
-        const nuevoStock = item.stock - item.cantidad
-        const { error: stockError } = await supabase
-          .from('productos')
-          .update({ stock: nuevoStock })
-          .eq('id', item.id)
-
-        if (stockError) throw stockError
-      }
 
       notificar(
         `Venta de S/ ${totalPagar.toFixed(2)} cobrada (${metodoPago}) · ${clienteSeleccionado ? clienteSeleccionado.nombre : 'Consumidor final'}`,
@@ -1262,24 +1295,36 @@ function App() {
 
   // --- CAPA GLOBAL: TOAST Y RESUMEN DE CIERRE ---
   const estilosToast = {
-    exito: { barra: 'bg-green-500', icono: '✅', titulo: 'Listo' },
-    error: { barra: 'bg-red-500', icono: '⛔', titulo: 'Ups, algo salió mal' },
-    aviso: { barra: 'bg-yellow-400', icono: '⚠️', titulo: 'Atención' }
+    exito: { barra: 'bg-emerald-500', icono: CheckCircle2, titulo: 'Listo' },
+    error: { barra: 'bg-red-500', icono: XCircle, titulo: 'Ups, algo salió mal' },
+    aviso: { barra: 'bg-amber-400', icono: AlertTriangle, titulo: 'Atención' }
   }
+
+  const botonTema = (
+    <button
+      type="button"
+      onClick={() => setTema(t => (t === 'dark' ? 'light' : 'dark'))}
+      aria-label={tema === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      title={tema === 'dark' ? 'Modo claro' : 'Modo oscuro'}
+      className="inline-flex items-center justify-center rounded-lg p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 transition"
+    >
+      {tema === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+    </button>
+  )
 
   const capaGlobal = (
     <>
       {toast && (
         <div key={toast.id} className="fixed top-5 right-5 z-[60] w-[calc(100%-2.5rem)] max-w-sm">
-          <div className="bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden flex">
+          <div className="bg-white rounded-xl shadow-xl border border-zinc-200 overflow-hidden flex">
             <div className={`w-1.5 ${estilosToast[toast.tipo].barra}`} />
             <div className="flex-1 p-4 flex items-start gap-3">
-              <span className="text-xl leading-none">{estilosToast[toast.tipo].icono}</span>
+              {(() => { const I = estilosToast[toast.tipo].icono; return <I className="w-5 h-5 shrink-0 mt-0.5 text-zinc-700" /> })()}
               <div className="flex-1">
-                <p className="text-sm font-bold text-gray-800">{estilosToast[toast.tipo].titulo}</p>
-                <p className="text-xs text-gray-600 mt-0.5 break-words">{toast.mensaje}</p>
+                <p className="text-sm font-bold text-zinc-800">{estilosToast[toast.tipo].titulo}</p>
+                <p className="text-xs text-zinc-600 mt-0.5 break-words">{toast.mensaje}</p>
               </div>
-              <button onClick={() => setToast(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+              <button onClick={() => setToast(null)} className="text-zinc-400 hover:text-zinc-600 text-lg leading-none">×</button>
             </div>
           </div>
         </div>
@@ -1289,44 +1334,44 @@ function App() {
         const dif = resumenCierre.diferencia
         const cuadra = Math.abs(dif) < 0.005
         const tono = cuadra
-          ? { fondo: 'bg-green-50', borde: 'border-green-200', texto: 'text-green-700', icono: '🎉', titulo: '¡Caja cuadrada!', sub: 'Todo coincide al céntimo. Buen trabajo.' }
+          ? { fondo: 'bg-emerald-50', borde: 'border-emerald-200', texto: 'text-emerald-700', icono: PartyPopper, titulo: '¡Caja cuadrada!', sub: 'Todo coincide al céntimo. Buen trabajo.' }
           : dif > 0
-            ? { fondo: 'bg-blue-50', borde: 'border-blue-200', texto: 'text-blue-700', icono: '💰', titulo: 'Caja con sobrante', sub: 'Hay más efectivo del esperado. Revisa si faltó registrar algo.' }
-            : { fondo: 'bg-red-50', borde: 'border-red-200', texto: 'text-red-700', icono: '🔎', titulo: 'Caja con faltante', sub: 'Hay menos efectivo del esperado. Revisa las ventas del turno.' }
+            ? { fondo: 'bg-blue-50', borde: 'border-blue-200', texto: 'text-blue-700', icono: Coins, titulo: 'Caja con sobrante', sub: 'Hay más efectivo del esperado. Revisa si faltó registrar algo.' }
+            : { fondo: 'bg-red-50', borde: 'border-red-200', texto: 'text-red-700', icono: SearchCheck, titulo: 'Caja con faltante', sub: 'Hay menos efectivo del esperado. Revisa las ventas del turno.' }
         const fila = (label, valor, destacado) => (
-          <div className={`flex justify-between items-center py-2 ${destacado ? 'font-bold text-gray-800' : 'text-gray-600'}`}>
+          <div className={`flex justify-between items-center py-2 ${destacado ? 'font-bold text-zinc-800' : 'text-zinc-600'}`}>
             <span className="text-sm">{label}</span>
             <span className="text-sm font-semibold">S/ {valor.toFixed(2)}</span>
           </div>
         )
         return (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[70]">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div className="fixed inset-0 bg-zinc-900/50 backdrop-blur-[2px] flex items-center justify-center p-4 z-[70]">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
               <div className={`${tono.fondo} ${tono.borde} border-b p-6 text-center`}>
-                <div className="text-5xl mb-2">{tono.icono}</div>
-                <h3 className={`text-xl font-extrabold ${tono.texto}`}>{tono.titulo}</h3>
-                <p className="text-xs text-gray-600 mt-1">{tono.sub}</p>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white border border-zinc-200"><tono.icono className={`w-6 h-6 ${tono.texto}`} /></div>
+                <h3 className={`text-xl font-bold tracking-tight ${tono.texto}`}>{tono.titulo}</h3>
+                <p className="text-xs text-zinc-600 mt-1">{tono.sub}</p>
               </div>
               <div className="p-6">
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-zinc-100">
                   {fila('Sencillo inicial', resumenCierre.apertura)}
                   {fila('Ventas en efectivo', resumenCierre.ventasEfectivo)}
                   {resumenCierre.retiros > 0 && fila('Retiros de caja (-)', resumenCierre.retiros)}
                   {fila('Monto esperado', resumenCierre.esperado, true)}
                   {fila('Efectivo contado', resumenCierre.real, true)}
                 </div>
-                <p className="text-[11px] text-gray-400 mt-3 text-center">
+                <p className="text-[11px] text-zinc-400 mt-3 text-center">
                   {resumenCierre.cantidadVentas} ventas por S/ {resumenCierre.totalVentas.toFixed(2)} en total · S/ {resumenCierre.ventasDigitales.toFixed(2)} fueron Yape/Plin/POS y no entran al cuadre
                 </p>
                 <div className={`mt-4 rounded-xl ${tono.fondo} ${tono.borde} border p-4 flex justify-between items-center`}>
-                  <span className="text-sm font-bold text-gray-700">Diferencia</span>
-                  <span className={`text-lg font-extrabold ${tono.texto}`}>
+                  <span className="text-sm font-bold text-zinc-700">Diferencia</span>
+                  <span className={`text-lg font-bold tracking-tight ${tono.texto}`}>
                     {dif > 0 ? '+' : dif < 0 ? '-' : ''}S/ {Math.abs(dif).toFixed(2)}
                   </span>
                 </div>
                 <button
                   onClick={() => { setResumenCierre(null); setTurnoAbierto(null) }}
-                  className="w-full mt-5 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl text-sm shadow-md transition"
+                  className="w-full mt-5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-md transition"
                 >
                   Finalizar turno
                 </button>
@@ -1339,42 +1384,92 @@ function App() {
   )
 
   if (cargandoSesion || verificandoTurno) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-100 font-medium">Cargando sistema Valkat Store...</div>
+    return <div className="min-h-screen flex items-center justify-center bg-zinc-100 font-medium">Cargando sistema Valkat Store...</div>
   }
 
   if (!session) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <div className="relative min-h-screen bg-zinc-50 flex items-center justify-center p-4">
         {capaGlobal}
-        <img src="/logo.png" alt="Logo Valkat Store" className="w-40 mb-4 rounded-xl shadow-sm" />
-        <h1 className="text-3xl font-bold text-blue-900 mb-8">Valkat Store - POS</h1>
-        <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-md border border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-800 mb-6 text-center">Acceso al Sistema</h2>
-          <form onSubmit={manejarLogin} className="flex flex-col gap-5">
-            <input type="email" required placeholder="Correo electrónico" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-            <input type="password" required placeholder="Contraseña" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-            <button type="submit" disabled={cargando} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition text-sm">
-              {cargando ? 'Ingresando...' : 'Iniciar Sesión'}
-            </button>
-          </form>
+        <div className="absolute top-4 right-4">{botonTema}</div>
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center mb-6">
+            <img src="/logo.png" alt="Logo Valkat Store" className="h-14 w-14 object-contain rounded-xl border border-zinc-200 bg-white p-1.5" />
+            <h1 className="mt-4 text-xl font-semibold tracking-tight text-zinc-900">Valkat Store</h1>
+            <p className="text-sm text-zinc-500">Punto de venta</p>
+          </div>
+          <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-6">
+            {olvideClave ? (
+              correoEnviado ? (
+                <div>
+                  <h2 className="text-base font-semibold text-zinc-900">Revisa tu correo</h2>
+                  <p className="text-xs text-zinc-500 mt-2 leading-relaxed">Si <span className="font-medium text-zinc-700">{email}</span> está registrado, te enviamos un enlace para crear una nueva contraseña. Revisa también la carpeta de spam.</p>
+                  <button type="button" onClick={() => { setOlvideClave(false); setCorreoEnviado(false) }} className="mt-5 w-full bg-zinc-900 hover:bg-zinc-800 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm">Volver a iniciar sesión</button>
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-base font-semibold text-zinc-900">Recuperar contraseña</h2>
+                  <p className="text-xs text-zinc-500 mt-1">Te enviaremos un enlace a tu correo para crear una nueva contraseña.</p>
+                  <form onSubmit={manejarRecuperar} className="mt-5 flex flex-col gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-600 mb-1.5">Correo electrónico</label>
+                      <input type="email" required placeholder="nombre@correo.com" value={email} onChange={(e) => setEmail(e.target.value)} className={claseCampo} />
+                    </div>
+                    <button type="submit" disabled={cargando} className="w-full bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-400 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm">
+                      {cargando ? 'Enviando...' : 'Enviar enlace'}
+                    </button>
+                    <button type="button" onClick={() => setOlvideClave(false)} className="text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">Volver</button>
+                  </form>
+                </>
+              )
+            ) : (
+              <>
+                <h2 className="text-base font-semibold text-zinc-900">Iniciar sesión</h2>
+                <p className="text-xs text-zinc-500 mt-1">Ingresa con tu cuenta para acceder al sistema.</p>
+                <form onSubmit={manejarLogin} className="mt-5 flex flex-col gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-600 mb-1.5">Correo electrónico</label>
+                    <input type="email" required placeholder="nombre@correo.com" value={email} onChange={(e) => setEmail(e.target.value)} className={claseCampo} />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-medium text-zinc-600">Contraseña</label>
+                      <button type="button" onClick={() => setOlvideClave(true)} className="text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">¿Olvidaste tu contraseña?</button>
+                    </div>
+                    <input type="password" required placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className={claseCampo} />
+                  </div>
+                  <button type="submit" disabled={cargando} className="w-full bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-400 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm mt-1">
+                    {cargando ? 'Ingresando...' : 'Iniciar sesión'}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+          <p className="text-center text-[11px] text-zinc-400 mt-5">© Valkat Store</p>
         </div>
       </div>
     )
   }
 
-  if (debeCambiarPassword) {
+  if (debeCambiarPassword || modoRecuperacion) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
         {capaGlobal}
-        <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-md border border-yellow-300">
-          <div className="flex justify-center mb-4"><span className="text-4xl">🔒</span></div>
-          <h2 className="text-xl font-bold text-gray-800 mb-2 text-center">Seguridad Requerida</h2>
-          <p className="text-sm text-gray-600 text-center mb-6">Por políticas de Valkat Store, debes crear una contraseña personal antes de entrar a la caja.</p>
-          <form onSubmit={manejarCambioPassword} className="flex flex-col gap-4">
-            <input type="password" required placeholder="Nueva contraseña" value={nuevaPassword} onChange={(e) => setNuevaPassword(e.target.value)} className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-500 text-sm" />
-            <input type="password" required placeholder="Confirma tu nueva contraseña" value={confirmarPassword} onChange={(e) => setConfirmarPassword(e.target.value)} className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-500 text-sm" />
-            <button type="submit" disabled={cargando} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded-xl transition mt-2 text-sm">
-              {cargando ? 'Actualizando...' : 'Guardar y Entrar'}
+        <div className="w-full max-w-sm bg-white rounded-xl border border-zinc-200 shadow-sm p-6">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 border border-amber-200 text-amber-600"><LockKeyhole className="w-5 h-5" /></div>
+          <h2 className="mt-4 text-base font-semibold text-zinc-900">Crea tu contraseña personal</h2>
+          <p className="text-xs text-zinc-500 mt-1 leading-relaxed">Por políticas de Valkat Store, debes crear una contraseña personal antes de entrar a la caja.</p>
+          <form onSubmit={manejarCambioPassword} className="mt-5 flex flex-col gap-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-600 mb-1.5">Nueva contraseña</label>
+              <input type="password" required placeholder="Nueva contraseña" value={nuevaPassword} onChange={(e) => setNuevaPassword(e.target.value)} className={claseCampo} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-600 mb-1.5">Confirmar contraseña</label>
+              <input type="password" required placeholder="Confirma tu nueva contraseña" value={confirmarPassword} onChange={(e) => setConfirmarPassword(e.target.value)} className={claseCampo} />
+            </div>
+            <button type="submit" disabled={cargando} className="w-full bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-400 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm mt-1">
+              {cargando ? 'Actualizando...' : 'Guardar y entrar'}
             </button>
           </form>
         </div>
@@ -1385,83 +1480,154 @@ function App() {
   // --- VISTA DE ADMINISTRADOR ---
   if (rol === 'admin') {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
+      <div className="min-h-screen bg-zinc-50">
         {capaGlobal}
-        <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
-          <div className="flex items-center gap-4">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 object-contain rounded" />
-            <h1 className="text-2xl font-bold text-blue-900">Panel Administrativo - Valkat Store</h1>
+        <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur">
+          <div className="mx-auto max-w-[1600px] px-4 lg:px-6 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain rounded-md" />
+              <div className="leading-tight">
+                <p className="text-sm font-semibold text-zinc-900">Valkat Store</p>
+                <p className="text-[11px] text-zinc-500">Panel administrativo</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Administrador · En línea
+              </span>
+              {botonTema}
+              <button onClick={cerrarSesion} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 transition">
+                <LogOut className="w-4 h-4" /><span className="hidden sm:inline">Cerrar sesión</span>
+              </button>
+            </div>
           </div>
-          <button onClick={cerrarSesion} className="bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2 rounded-lg font-medium transition text-sm">Cerrar Sesión</button>
-        </div>
+        </header>
 
-        {/* DASHBOARD PRINCIPAL DE ADMIN */}
+        <div className="mx-auto max-w-[1600px] px-4 lg:px-6 py-6 flex flex-col lg:flex-row gap-6 items-start">
+          <aside className="w-full lg:w-60 shrink-0 lg:sticky lg:top-20 bg-white rounded-xl border border-zinc-200 p-2">
+            <p className="hidden lg:block px-3 pt-2 pb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Menú</p>
+            <nav className="flex lg:flex-col gap-1 overflow-x-auto">
+              {modulosAdmin.map((m) => {
+                const activo = vistaAdmin === m.vista
+                return (
+                  <button
+                    key={m.vista}
+                    onClick={m.ir}
+                    className={`flex items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${activo ? 'bg-zinc-900 text-white' : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'}`}
+                  >
+                    <m.icono className="w-4 h-4 shrink-0" />
+                    <span>{m.titulo}</span>
+                  </button>
+                )
+              })}
+            </nav>
+          </aside>
+
+          <div className="flex-1 min-w-0 w-full">
+        {/* RESUMEN (VISTA PREDETERMINADA DEL ADMIN) */}
         {vistaAdmin === 'dashboard' && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
+          <div className="space-y-6">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
               <div>
-                <span className="text-2xl">💰</span>
-                <h2 className="text-lg font-bold text-gray-700 mt-2">Cuadre y Resumen de Caja</h2>
-                <p className="text-gray-500 mt-1 text-sm">Revisa los turnos, montos esperados y efectivo reportado.</p>
+                <h2 className="text-2xl font-bold text-zinc-800">Resumen general</h2>
+                <p className="text-sm text-zinc-500">Así va Valkat Store · {etiquetaRangoReporte.toLowerCase()}</p>
               </div>
-              <button onClick={() => { setVistaAdmin('cuadre'); cargarTurnosAdmin(); }} className="mt-6 w-full bg-yellow-100 text-yellow-800 hover:bg-yellow-200 font-semibold py-2 rounded-lg transition text-sm">
-                Ver Cuadres de Caja
-              </button>
+              <div className="inline-flex rounded-xl border border-zinc-200 bg-white p-1 shadow-sm">
+                {RANGOS_REPORTE.map(r => (
+                  <button key={r.id} onClick={() => cambiarRangoReporte(r.id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${rangoReporte === r.id ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-100'}`}>
+                    {r.etiqueta}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
-              <div>
-                <span className="text-2xl">📊</span>
-                <h2 className="text-lg font-bold text-gray-700 mt-2">Reportes y Analítica</h2>
-                <p className="text-gray-500 mt-1 text-sm">Métricas de productos más vendidos y alertas de stock.</p>
-              </div>
-              <button onClick={() => { setVistaAdmin('reportes'); cargarProductos(); cargarReporteVentas(rangoReporte); }} className="mt-6 w-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200 font-semibold py-2 rounded-lg transition text-sm">
-                Ver Reportes
-              </button>
+            <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+              {[
+                { t: 'Importe vendido', v: cargandoReporte ? '…' : soles(resumenReporte.totalImporte), s: 'en el período', c: 'text-zinc-900' },
+                { t: 'Unidades vendidas', v: cargandoReporte ? '…' : resumenReporte.totalUnidades, s: `${resumenReporte.productos.length} productos distintos`, c: 'text-indigo-700' },
+                { t: 'Productos en catálogo', v: listaProductosAdmin.length, s: `${kpiInventario.agotados} agotados · ${kpiInventario.bajos} con stock bajo`, c: 'text-emerald-700' }
+              ].map(k => (
+                <div key={k.t} className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
+                  <p className="text-xs font-semibold text-zinc-500">{k.t}</p>
+                  <p className={`mt-2 text-2xl font-bold tracking-tight ${k.c}`}>{k.v}</p>
+                  <p className="mt-1 text-[11px] text-zinc-400">{k.s}</p>
+                </div>
+              ))}
             </div>
 
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
-              <div>
-                <span className="text-2xl">📦</span>
-                <h2 className="text-lg font-bold text-gray-700 mt-2">Inventario de Productos</h2>
-                <p className="text-gray-500 mt-1 text-sm">Busca, edita precios o agrega cámaras y accesorios.</p>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-zinc-800">Más vendidos</h3>
+                  <button onClick={() => modulosAdmin.find(m => m.vista === 'reportes').ir()} className="text-xs font-bold text-blue-700 hover:underline">Ver reportes →</button>
+                </div>
+                {cargandoReporte ? (
+                  <p className="text-sm text-zinc-400">Calculando…</p>
+                ) : resumenReporte.productos.length === 0 ? (
+                  <p className="text-sm text-zinc-400">Sin ventas en este período.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {resumenReporte.productos.slice(0, 5).map((prod, i) => (
+                      <li key={prod.nombre + prod.marca}>
+                        <div className="flex justify-between text-sm">
+                          <span className="font-semibold text-zinc-700 truncate pr-3">{i + 1}. {prod.nombre}</span>
+                          <span className="text-zinc-500 whitespace-nowrap">{prod.cantidad} und · {soles(prod.importe)}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-zinc-100">
+                          <div className="h-1.5 rounded-full bg-blue-500" style={{ width: `${(prod.cantidad / resumenReporte.productos[0].cantidad) * 100}%` }} />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <button onClick={() => { setVistaAdmin('productos'); cargarProductos(); }} className="mt-6 w-full bg-green-100 text-green-700 hover:bg-green-200 font-semibold py-2 rounded-lg transition text-sm">
-                Gestionar Productos
-              </button>
-            </div>
-            
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
-              <div>
-                <span className="text-2xl">👥</span>
-                <h2 className="text-lg font-bold text-gray-700 mt-2">Gestión de Usuarios</h2>
-                <p className="text-gray-500 mt-1 text-sm">Administra cajeros, correos y permisos de acceso.</p>
+
+              <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
+                <h3 className="font-bold text-zinc-800 mb-4">Ventas por categoría</h3>
+                {cargandoReporte ? (
+                  <p className="text-sm text-zinc-400">Calculando…</p>
+                ) : resumenReporte.categorias.length === 0 ? (
+                  <p className="text-sm text-zinc-400">Sin ventas en este período.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {resumenReporte.categorias.slice(0, 6).map(c => (
+                      <li key={c.tipo}>
+                        <div className="flex justify-between text-sm">
+                          <span className="font-semibold text-zinc-700">{c.tipo}</span>
+                          <span className="text-zinc-500">{c.cantidad} und · {soles(c.importe)}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-zinc-100">
+                          <div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${(c.cantidad / resumenReporte.categorias[0].cantidad) * 100}%` }} />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <button onClick={() => { setVistaAdmin('usuarios'); cargarUsuarios(); }} className="mt-6 w-full bg-blue-100 text-blue-700 hover:bg-blue-200 font-semibold py-2 rounded-lg transition text-sm">
-                Abrir Gestión de Usuarios
-              </button>
             </div>
 
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
-              <div>
-                <span className="text-2xl">🌐</span>
-                <h2 className="text-lg font-bold text-gray-700 mt-2">Tienda Web</h2>
-                <p className="text-gray-500 mt-1 text-sm">Productos en la web, promoción de memorias y live de TikTok.</p>
+            <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-zinc-800"><AlertTriangle className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Alertas de stock</h3>
+                <button onClick={() => modulosAdmin.find(m => m.vista === 'productos').ir()} className="text-xs font-bold text-emerald-700 hover:underline">Ir al inventario →</button>
               </div>
-              <button onClick={() => setVistaAdmin('web')} className="mt-6 w-full bg-teal-100 text-teal-700 hover:bg-teal-200 font-semibold py-2 rounded-lg transition text-sm">
-                Administrar Tienda Web
-              </button>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
-              <div>
-                <span className="text-2xl">💼</span>
-                <h2 className="text-lg font-bold text-gray-700 mt-2">Cuentas y Pagos</h2>
-                <p className="text-gray-500 mt-1 text-sm">Alquiler, servicios, sueldos, adelantos y cuentas por pagar a proveedores.</p>
-              </div>
-              <button onClick={() => setVistaAdmin('cuentas')} className="mt-6 w-full bg-amber-100 text-amber-700 hover:bg-amber-200 font-semibold py-2 rounded-lg transition text-sm">
-                Administrar Cuentas
-              </button>
+              {alertasStock.length === 0 ? (
+                <p className="text-sm text-zinc-400">Sin alertas: todo tiene stock suficiente.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {alertasStock.map(p => (
+                    <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-zinc-700">{p.nombre}</p>
+                        <p className="text-[11px] text-zinc-400">{p.tipo}</p>
+                      </div>
+                      {(Number(p.stock) || 0) <= 0
+                        ? <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-1 rounded-full">Agotado</span>
+                        : <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Quedan {p.stock}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1476,18 +1642,18 @@ function App() {
 
         {/* VISTA DE CUADRE Y RESUMEN DE CAJAS */}
         {vistaAdmin === 'cuadre' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+          <div className="bg-white rounded-xl shadow-sm border border-zinc-200 overflow-hidden">
+            <div className="p-6 border-b border-zinc-200 flex justify-between items-center bg-zinc-50">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">💼 Cuadre de Caja y Turnos de Empleados</h2>
-                <p className="text-xs text-gray-500 mt-1">Historial completo con montos esperados, reales y diferencias.</p>
+                <h2 className="text-xl font-bold text-zinc-800"><Briefcase className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Cuadre de caja y turnos de empleados</h2>
+                <p className="text-xs text-zinc-500 mt-1">Historial completo con montos esperados, reales y diferencias.</p>
               </div>
-              <button onClick={() => setVistaAdmin('dashboard')} className="text-gray-500 hover:text-gray-800 font-medium text-sm">← Volver</button>
+              <button onClick={() => setVistaAdmin('dashboard')} className="text-zinc-500 hover:text-zinc-800 font-medium text-sm">← Volver</button>
             </div>
 
             <div className="overflow-x-auto max-h-[550px]">
               <table className="w-full text-left">
-                <thead className="bg-gray-50 text-gray-600 text-sm sticky top-0">
+                <thead className="bg-zinc-50 text-zinc-600 text-sm sticky top-0">
                   <tr>
                     <th className="p-4 font-semibold">Cajero</th>
                     <th className="p-4 font-semibold">Estado</th>
@@ -1499,46 +1665,46 @@ function App() {
                     <th className="p-4 font-semibold">Detalle</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 text-sm">
+                <tbody className="divide-y divide-zinc-100 text-sm">
                   {listaTurnosAdmin.map((turno) => (
-                    <tr key={turno.id} className="hover:bg-gray-50 transition">
-                      <td className="p-4 font-medium text-gray-800">
+                    <tr key={turno.id} className="hover:bg-zinc-50 transition">
+                      <td className="p-4 font-medium text-zinc-800">
                         {turno.usuarios?.nombre_completo || 'Usuario'} 
-                        <span className="block text-xs text-gray-400">{turno.usuarios?.email}</span>
+                        <span className="block text-xs text-zinc-400">{turno.usuarios?.email}</span>
                       </td>
                       <td className="p-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${turno.estado === 'Abierta' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${turno.estado === 'Abierta' ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-100 text-zinc-700'}`}>
                           {turno.estado.toUpperCase()}
                         </span>
                       </td>
                       <td className="p-4 font-semibold text-blue-700">S/ {turno.monto_apertura.toFixed(2)}</td>
-                      <td className="p-4 font-semibold text-gray-700">
+                      <td className="p-4 font-semibold text-zinc-700">
                         {turno.monto_cierre_esperado !== null ? `S/ ${Number(turno.monto_cierre_esperado).toFixed(2)}` : 'Calculando...'}
                       </td>
-                      <td className="p-4 font-bold text-green-700">
+                      <td className="p-4 font-bold text-emerald-700">
                         {turno.monto_cierre_real !== null ? `S/ ${Number(turno.monto_cierre_real).toFixed(2)}` : 'En caja'}
                       </td>
                       <td className="p-4">
                         {turno.diferencia !== null ? (
-                          <span className={`font-bold px-2 py-1 rounded text-xs ${Number(turno.diferencia) < 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                          <span className={`font-bold px-2 py-1 rounded text-xs ${Number(turno.diferencia) < 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
                             S/ {Number(turno.diferencia).toFixed(2)}
                           </span>
                         ) : '-'}
                       </td>
-                      <td className="p-4 text-xs text-gray-500">
+                      <td className="p-4 text-xs text-zinc-500">
                         {fechaLocal(turno.fecha_apertura)?.toLocaleString('es-PE')}
-                        <span className="block text-[10px] text-gray-400">
+                        <span className="block text-[10px] text-zinc-400">
                           {turno.fecha_cierre ? `Cierre: ${fechaLocal(turno.fecha_cierre).toLocaleString('es-PE')}` : 'Turno en curso'}
                         </span>
                       </td>
                       <td className="p-4">
                         <div className="flex flex-col gap-1.5 items-start">
                           <button onClick={() => verDetalleTurno(turno)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs px-3 py-1.5 rounded-lg transition whitespace-nowrap">
-                          🔍 Ver detalle
+                          <Eye className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Ver detalle
                         </button>
                           {turno.estado === 'Abierta' && (
                             <button onClick={() => abrirRetiroAdmin(turno)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs px-3 py-1.5 rounded-lg transition whitespace-nowrap">
-                              💸 Retirar efectivo
+                              <ArrowDownToLine className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Retirar efectivo
                             </button>
                           )}
                         </div>
@@ -1546,7 +1712,7 @@ function App() {
                     </tr>
                   ))}
                   {listaTurnosAdmin.length === 0 && (
-                    <tr><td colSpan="8" className="p-6 text-center text-gray-400">No hay turnos de caja registrados todavía.</td></tr>
+                    <tr><td colSpan="8" className="p-6 text-center text-zinc-400">No hay turnos de caja registrados todavía.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -1556,33 +1722,33 @@ function App() {
 
         {/* MODAL RETIRO DE CAJA (ADMIN) */}
         {turnoRetiro && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[55]">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-indigo-200">
-              <div className="flex justify-center mb-2"><span className="text-3xl">💸</span></div>
-              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Retiro de Caja</h3>
-              <p className="text-xs text-gray-500 text-center mb-4">Turno de {turnoRetiro.usuarios?.nombre_completo || 'cajero'}</p>
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-[55]">
+            <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md border border-indigo-200">
+              <div className="flex justify-center mb-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700"><ArrowDownToLine className="w-5 h-5" /></span></div>
+              <h3 className="text-lg font-bold text-zinc-800 text-center mb-1">Retiro de Caja</h3>
+              <p className="text-xs text-zinc-500 text-center mb-4">Turno de {turnoRetiro.usuarios?.nombre_completo || 'cajero'}</p>
 
               <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-center mb-4">
                 <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider">Efectivo disponible en caja</span>
-                <p className="text-2xl font-extrabold text-indigo-900 mt-1">{retiroDisponible === null ? 'Calculando...' : soles(retiroDisponible)}</p>
+                <p className="text-2xl font-bold tracking-tight text-indigo-900 mt-1">{retiroDisponible === null ? 'Calculando...' : soles(retiroDisponible)}</p>
                 <span className="text-[10px] text-indigo-500">Sencillo inicial + ventas en efectivo - retiros anteriores</span>
               </div>
 
               <form onSubmit={registrarRetiroAdmin} autoComplete="off" className="flex flex-col gap-3">
                 <div>
                   <div className="flex justify-between items-center mb-1">
-                    <label className="text-xs font-bold text-gray-600">Monto a retirar (S/)</label>
+                    <label className="text-xs font-bold text-zinc-600">Monto a retirar (S/)</label>
                     <button type="button" disabled={retiroDisponible === null} onClick={() => setRetiroMonto(Math.max(0, retiroDisponible).toFixed(2))} className="text-xs font-bold text-indigo-600 hover:text-indigo-800">Retirar todo</button>
                   </div>
                   <input type="number" step="0.01" min="0.01" required autoComplete="off" placeholder="0.00" value={retiroMonto} onChange={(e) => setRetiroMonto(e.target.value)} className={claseInputModal} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Motivo</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Motivo</label>
                   <input type="text" required autoComplete="off" placeholder="Ej: Depósito al banco, pago a proveedor" value={retiroMotivo} onChange={(e) => setRetiroMotivo(e.target.value)} className={claseInputModal} />
                 </div>
                 <div className="flex gap-3 mt-2">
-                  <button type="button" onClick={cerrarModalesRetiro} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
-                  <button type="submit" disabled={cargando || retiroDisponible === null} className="w-1/2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-sm shadow-md">
+                  <button type="button" onClick={cerrarModalesRetiro} className="w-1/2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
+                  <button type="submit" disabled={cargando || retiroDisponible === null} className="w-1/2 bg-zinc-900 hover:bg-zinc-800 text-white font-bold py-3 rounded-xl text-sm shadow-md">
                     {cargando ? 'Guardando...' : 'Registrar retiro'}
                   </button>
                 </div>
@@ -1599,50 +1765,50 @@ function App() {
           const kpi = (titulo, valor, clase) => (
             <div className={`p-3 rounded-xl border ${clase}`}>
               <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">{titulo}</span>
-              <p className="text-lg font-extrabold mt-0.5">{valor}</p>
+              <p className="text-lg font-bold tracking-tight mt-0.5">{valor}</p>
             </div>
           )
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
                 <div className="sticky top-0 bg-white border-b p-5 flex justify-between items-start z-10">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-800">Detalle del turno · {turnoDetalle.usuarios?.nombre_completo || 'Cajero'}</h3>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <h3 className="text-lg font-bold text-zinc-800">Detalle del turno · {turnoDetalle.usuarios?.nombre_completo || 'Cajero'}</h3>
+                    <p className="text-xs text-zinc-500 mt-1">
                       {fechaLocal(turnoDetalle.fecha_apertura)?.toLocaleString('es-PE')}
                       {turnoDetalle.fecha_cierre ? ` → ${fechaLocal(turnoDetalle.fecha_cierre).toLocaleString('es-PE')}` : ' · Turno en curso'}
                     </p>
                   </div>
-                  <button onClick={() => setTurnoDetalle(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+                  <button onClick={() => setTurnoDetalle(null)} className="text-zinc-400 hover:text-zinc-700 text-2xl leading-none">×</button>
                 </div>
 
                 {cargandoDetalle ? (
-                  <p className="p-10 text-center text-sm text-gray-400">Cargando ventas del turno...</p>
+                  <p className="p-10 text-center text-sm text-zinc-400">Cargando ventas del turno...</p>
                 ) : (
                   <div className="p-5 flex flex-col gap-6">
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {kpi('Total vendido', soles(r.total), 'bg-green-50 border-green-100 text-green-800')}
-                      {kpi('N° de ventas', r.cantidad, 'bg-gray-50 border-gray-200 text-gray-800')}
+                      {kpi('Total vendido', soles(r.total), 'bg-emerald-50 border-emerald-100 text-emerald-800')}
+                      {kpi('N° de ventas', r.cantidad, 'bg-zinc-50 border-zinc-200 text-zinc-800')}
                       {kpi('Descuentos', soles(r.descuento), 'bg-red-50 border-red-100 text-red-700')}
-                      {kpi('Efectivo', soles(r.efectivo), 'bg-yellow-50 border-yellow-100 text-yellow-800')}
+                      {kpi('Efectivo', soles(r.efectivo), 'bg-amber-50 border-amber-100 text-amber-800')}
                       {kpi('Yape / Plin', soles(r.yape), 'bg-purple-50 border-purple-100 text-purple-800')}
                       {kpi('Tarjeta POS', soles(r.tarjeta), 'bg-blue-50 border-blue-100 text-blue-800')}
                     </div>
                     {r.mixtoSinDesglose > 0 && (
-                      <p className="text-xs text-gray-500 -mt-3">
+                      <p className="text-xs text-zinc-500 -mt-3">
                         Hay {soles(r.mixtoSinDesglose)} en pagos mixtos antiguos sin desglose de efectivo/Yape.
                       </p>
                     )}
 
-                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-                      <div><span className="block text-[11px] text-gray-500">Sencillo inicial</span><b>{soles(turnoDetalle.monto_apertura)}</b></div>
-                      <div><span className="block text-[11px] text-gray-500">Retiros</span><b className={totalRetirosDetalle > 0 ? 'text-indigo-700' : ''}>{totalRetirosDetalle > 0 ? '-' : ''}{soles(totalRetirosDetalle)}</b></div>
-                      <div><span className="block text-[11px] text-gray-500">Esperado en caja</span><b>{cerrado ? soles(turnoDetalle.monto_cierre_esperado) : soles(Number(turnoDetalle.monto_apertura) + r.efectivo - totalRetirosDetalle) + ' (parcial)'}</b></div>
-                      <div><span className="block text-[11px] text-gray-500">Efectivo contado</span><b>{cerrado ? soles(turnoDetalle.monto_cierre_real) : 'En caja'}</b></div>
+                    <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+                      <div><span className="block text-[11px] text-zinc-500">Sencillo inicial</span><b>{soles(turnoDetalle.monto_apertura)}</b></div>
+                      <div><span className="block text-[11px] text-zinc-500">Retiros</span><b className={totalRetirosDetalle > 0 ? 'text-indigo-700' : ''}>{totalRetirosDetalle > 0 ? '-' : ''}{soles(totalRetirosDetalle)}</b></div>
+                      <div><span className="block text-[11px] text-zinc-500">Esperado en caja</span><b>{cerrado ? soles(turnoDetalle.monto_cierre_esperado) : soles(Number(turnoDetalle.monto_apertura) + r.efectivo - totalRetirosDetalle) + ' (parcial)'}</b></div>
+                      <div><span className="block text-[11px] text-zinc-500">Efectivo contado</span><b>{cerrado ? soles(turnoDetalle.monto_cierre_real) : 'En caja'}</b></div>
                       <div>
-                        <span className="block text-[11px] text-gray-500">Diferencia</span>
+                        <span className="block text-[11px] text-zinc-500">Diferencia</span>
                         {cerrado && turnoDetalle.diferencia !== null ? (
-                          <b className={Number(turnoDetalle.diferencia) < 0 ? 'text-red-600' : Number(turnoDetalle.diferencia) > 0 ? 'text-blue-600' : 'text-green-600'}>
+                          <b className={Number(turnoDetalle.diferencia) < 0 ? 'text-red-600' : Number(turnoDetalle.diferencia) > 0 ? 'text-blue-600' : 'text-emerald-600'}>
                             {soles(turnoDetalle.diferencia)}
                           </b>
                         ) : <b>-</b>}
@@ -1652,29 +1818,29 @@ function App() {
                     {(retirosTurnoDetalle.length > 0 || !cerrado) && (
                       <div>
                         <div className="flex justify-between items-center mb-2">
-                          <h4 className="text-sm font-bold text-gray-700">💸 Retiros de caja</h4>
+                          <h4 className="text-sm font-bold text-zinc-700"><ArrowDownToLine className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Retiros de caja</h4>
                           {!cerrado && (
-                            <button onClick={() => abrirRetiroAdmin(turnoDetalle)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                            <button onClick={() => abrirRetiroAdmin(turnoDetalle)} className="bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
                               + Retirar efectivo
                             </button>
                           )}
                         </div>
-                        <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                        <div className="border border-zinc-200 rounded-xl overflow-x-auto">
                           <table className="w-full text-left text-sm">
-                            <thead className="bg-gray-50 text-gray-600 text-xs">
+                            <thead className="bg-zinc-50 text-zinc-500 text-[11px] uppercase tracking-wider border-b border-zinc-200">
                               <tr><th className="p-3">Hora</th><th className="p-3">Motivo</th><th className="p-3">Autorizó</th><th className="p-3 text-right">Monto</th></tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="divide-y divide-zinc-100">
                               {retirosTurnoDetalle.map(x => (
                                 <tr key={x.id}>
-                                  <td className="p-3 text-xs text-gray-500 whitespace-nowrap">{fechaLocal(x.created_at)?.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                                  <td className="p-3 text-xs text-gray-800">{x.motivo}</td>
-                                  <td className="p-3 text-xs text-gray-600">{x.usuarios?.nombre_completo || '-'}</td>
+                                  <td className="p-3 text-xs text-zinc-500 whitespace-nowrap">{fechaLocal(x.created_at)?.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                                  <td className="p-3 text-xs text-zinc-800">{x.motivo}</td>
+                                  <td className="p-3 text-xs text-zinc-600">{x.usuarios?.nombre_completo || '-'}</td>
                                   <td className="p-3 text-right font-bold text-indigo-700 whitespace-nowrap">-{soles(x.monto)}</td>
                                 </tr>
                               ))}
                               {retirosTurnoDetalle.length === 0 && (
-                                <tr><td colSpan="4" className="p-4 text-center text-gray-400 text-xs">Este turno aún no tiene retiros.</td></tr>
+                                <tr><td colSpan="4" className="p-4 text-center text-zinc-400 text-xs">Este turno aún no tiene retiros.</td></tr>
                               )}
                             </tbody>
                           </table>
@@ -1683,22 +1849,22 @@ function App() {
                     )}
 
                     <div>
-                      <h4 className="text-sm font-bold text-gray-700 mb-2">📦 Productos vendidos</h4>
-                      <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <h4 className="text-sm font-bold text-zinc-700 mb-2"><Package className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Productos vendidos</h4>
+                      <div className="border border-zinc-200 rounded-xl overflow-hidden">
                         <table className="w-full text-left text-sm">
-                          <thead className="bg-gray-50 text-gray-600 text-xs">
+                          <thead className="bg-zinc-50 text-zinc-500 text-[11px] uppercase tracking-wider border-b border-zinc-200">
                             <tr><th className="p-3">Producto</th><th className="p-3 text-center">Cant.</th><th className="p-3 text-right">Importe</th></tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-100">
+                          <tbody className="divide-y divide-zinc-100">
                             {r.productos.map(pr => (
                               <tr key={pr.nombre + pr.marca}>
-                                <td className="p-3 text-gray-800">{pr.nombre}{pr.marca && <span className="text-xs text-gray-400"> · {pr.marca}</span>}</td>
+                                <td className="p-3 text-zinc-800">{pr.nombre}{pr.marca && <span className="text-xs text-zinc-400"> · {pr.marca}</span>}</td>
                                 <td className="p-3 text-center font-bold">{pr.cantidad}</td>
-                                <td className="p-3 text-right font-semibold text-green-700">{soles(pr.importe)}</td>
+                                <td className="p-3 text-right font-semibold text-emerald-700">{soles(pr.importe)}</td>
                               </tr>
                             ))}
                             {r.productos.length === 0 && (
-                              <tr><td colSpan="3" className="p-5 text-center text-gray-400 text-xs">Este turno no tiene ventas registradas.</td></tr>
+                              <tr><td colSpan="3" className="p-5 text-center text-zinc-400 text-xs">Este turno no tiene ventas registradas.</td></tr>
                             )}
                           </tbody>
                         </table>
@@ -1706,28 +1872,28 @@ function App() {
                     </div>
 
                     <div>
-                      <h4 className="text-sm font-bold text-gray-700 mb-2">🧾 Ventas del turno</h4>
-                      <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                      <h4 className="text-sm font-bold text-zinc-700 mb-2"><ReceiptText className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Ventas del turno</h4>
+                      <div className="border border-zinc-200 rounded-xl overflow-x-auto">
                         <table className="w-full text-left text-sm">
-                          <thead className="bg-gray-50 text-gray-600 text-xs">
+                          <thead className="bg-zinc-50 text-zinc-500 text-[11px] uppercase tracking-wider border-b border-zinc-200">
                             <tr>
                               <th className="p-3">Hora</th><th className="p-3">Cliente</th><th className="p-3">Productos</th>
                               <th className="p-3">Medio de pago</th><th className="p-3 text-right">Total</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-100">
+                          <tbody className="divide-y divide-zinc-100">
                             {ventasTurnoDetalle.map(v => {
                               const bruto = (v.detalle_ventas || []).reduce((a, d) => a + Number(d.subtotal), 0)
                               const desc = Math.max(0, bruto - Number(v.total))
                               return (
                                 <tr key={v.id} className="align-top">
-                                  <td className="p-3 text-xs text-gray-500 whitespace-nowrap">{fechaLocal(v.fecha_venta)?.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</td>
+                                  <td className="p-3 text-xs text-zinc-500 whitespace-nowrap">{fechaLocal(v.fecha_venta)?.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</td>
                                   <td className="p-3 text-xs">
-                                    {v.clientes ? (<>{v.clientes.nombre}<span className="block text-gray-400">{v.clientes.documento || ''}</span></>) : <span className="text-gray-400">Consumidor final</span>}
+                                    {v.clientes ? (<>{v.clientes.nombre}<span className="block text-zinc-400">{v.clientes.documento || ''}</span></>) : <span className="text-zinc-400">Consumidor final</span>}
                                   </td>
-                                  <td className="p-3 text-xs text-gray-700">{(v.detalle_ventas || []).map(d => `${d.cantidad}× ${d.productos?.nombre || 'Producto'}`).join(', ')}</td>
+                                  <td className="p-3 text-xs text-zinc-700">{(v.detalle_ventas || []).map(d => `${d.cantidad}× ${d.productos?.nombre || 'Producto'}`).join(', ')}</td>
                                   <td className="p-3 text-xs">{etiquetaPago(v)}</td>
-                                  <td className="p-3 text-right font-bold text-green-700 whitespace-nowrap">
+                                  <td className="p-3 text-right font-bold text-emerald-700 whitespace-nowrap">
                                     {soles(v.total)}
                                     {desc > 0 && <span className="block text-[10px] font-semibold text-red-500">Desc. -{soles(desc)}</span>}
                                   </td>
@@ -1747,22 +1913,22 @@ function App() {
 
         {/* VISTA DE REPORTES Y ANALÍTICA */}
         {vistaAdmin === 'reportes' && (
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-zinc-200">
             <div className="flex justify-between items-center border-b pb-4 mb-6">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">📈 Dashboard Gerencial - Valkat Store</h2>
-                <p className="text-xs text-gray-500 mt-1">Análisis de rotación de productos y alertas operativas.</p>
+                <h2 className="text-xl font-bold text-zinc-800"><TrendingUp className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Dashboard gerencial · Valkat Store</h2>
+                <p className="text-xs text-zinc-500 mt-1">Análisis de rotación de productos y alertas operativas.</p>
               </div>
-              <button onClick={() => setVistaAdmin('dashboard')} className="text-gray-500 hover:text-gray-800 font-medium text-sm">← Volver al Dashboard</button>
+              <button onClick={() => setVistaAdmin('dashboard')} className="text-zinc-500 hover:text-zinc-800 font-medium text-sm">← Volver al Dashboard</button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mb-5">
-              <span className="text-xs font-bold text-gray-500 mr-1">Período de ventas:</span>
+              <span className="text-xs font-bold text-zinc-500 mr-1">Período de ventas:</span>
               {RANGOS_REPORTE.map(r => (
                 <button
                   key={r.id}
                   onClick={() => cambiarRangoReporte(r.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${rangoReporte === r.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${rangoReporte === r.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50'}`}
                 >
                   {r.etiqueta}
                 </button>
@@ -1772,24 +1938,24 @@ function App() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
               <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl">
                 <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">Total Catálogo</span>
-                <h3 className="text-2xl font-extrabold text-blue-900 mt-1">{listaProductosAdmin.length} productos</h3>
+                <h3 className="text-2xl font-bold tracking-tight text-zinc-900 mt-1">{listaProductosAdmin.length} productos</h3>
                 <span className="text-xs text-blue-500 mt-1 block">Registrados en tienda (Ate)</span>
               </div>
 
-              <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl">
-                <span className="text-xs font-bold text-yellow-600 uppercase tracking-wider">Stock Crítico (&lt; 5)</span>
-                <h3 className="text-2xl font-extrabold text-yellow-900 mt-1">
+              <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl">
+                <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Stock Crítico (&lt; 5)</span>
+                <h3 className="text-2xl font-bold tracking-tight text-amber-900 mt-1">
                   {listaProductosAdmin.filter(p => p.stock < 5).length} productos
                 </h3>
-                <span className="text-xs text-yellow-600 mt-1 block">Requieren pedido de reposición</span>
+                <span className="text-xs text-amber-600 mt-1 block">Requieren pedido de reposición</span>
               </div>
 
-              <div className="bg-green-50 border border-green-100 p-4 rounded-xl">
-                <span className="text-xs font-bold text-green-600 uppercase tracking-wider">Categoría Destacada</span>
-                <h3 className="text-xl font-extrabold text-green-900 mt-1">
+              <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl">
+                <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Categoría Destacada</span>
+                <h3 className="text-xl font-bold tracking-tight text-emerald-900 mt-1">
                   {cargandoReporte ? 'Calculando...' : (resumenReporte.categorias[0]?.tipo || 'Sin ventas')}
                 </h3>
-                <span className="text-xs text-green-600 mt-1 block">
+                <span className="text-xs text-emerald-600 mt-1 block">
                   {resumenReporte.categorias[0]
                     ? `${resumenReporte.categorias[0].cantidad} unidades · ${soles(resumenReporte.categorias[0].importe)} (${etiquetaRangoReporte.toLowerCase()})`
                     : `Sin ventas en: ${etiquetaRangoReporte.toLowerCase()}`}
@@ -1798,42 +1964,42 @@ function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="border border-gray-200 p-5 rounded-2xl bg-gray-50">
-                <h3 className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
-                  <span>🔥</span> Productos con Mayor Salida
-                  <span className="text-[10px] font-normal text-gray-400">({etiquetaRangoReporte})</span>
+              <div className="border border-zinc-200 p-5 rounded-xl bg-zinc-50">
+                <h3 className="text-sm font-bold text-zinc-700 mb-4 flex items-center gap-2">
+                  <Flame className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" /> Productos con Mayor Salida
+                  <span className="text-[10px] font-normal text-zinc-400">({etiquetaRangoReporte})</span>
                 </h3>
                 {cargandoReporte ? (
-                  <p className="text-xs text-gray-400 text-center py-6">Calculando ventas...</p>
+                  <p className="text-xs text-zinc-400 text-center py-6">Calculando ventas...</p>
                 ) : (
                   <>
                     <div className="flex flex-col gap-3">
                       {resumenReporte.productos.slice(0, 5).map((prod, idx) => (
-                        <div key={prod.nombre + prod.marca} className="bg-white p-3 rounded-xl border border-gray-100 shadow-xs">
+                        <div key={prod.nombre + prod.marca} className="bg-white p-3 rounded-xl border border-zinc-100 shadow-xs">
                           <div className="flex justify-between items-center">
                             <div className="flex items-center gap-3">
                               <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center">#{idx + 1}</span>
                               <div>
-                                <h4 className="font-bold text-gray-800 text-xs">{prod.nombre}</h4>
-                                <span className="text-[10px] text-gray-400">Marca: {prod.marca || '-'} | Tipo: {prod.tipo}</span>
+                                <h4 className="font-bold text-zinc-800 text-xs">{prod.nombre}</h4>
+                                <span className="text-[10px] text-zinc-400">Marca: {prod.marca || '-'} | Tipo: {prod.tipo}</span>
                               </div>
                             </div>
                             <div className="text-right">
-                              <span className="font-extrabold text-blue-700 text-xs">{prod.cantidad} und.</span>
-                              <span className="block text-[10px] text-gray-400">{soles(prod.importe)}</span>
+                              <span className="font-bold tracking-tight text-blue-700 text-xs">{prod.cantidad} und.</span>
+                              <span className="block text-[10px] text-zinc-400">{soles(prod.importe)}</span>
                             </div>
                           </div>
-                          <div className="h-1.5 bg-gray-100 rounded-full mt-2">
+                          <div className="h-1.5 bg-zinc-100 rounded-full mt-2">
                             <div className="h-1.5 bg-blue-500 rounded-full" style={{ width: `${(prod.cantidad / resumenReporte.productos[0].cantidad) * 100}%` }} />
                           </div>
                         </div>
                       ))}
                       {resumenReporte.productos.length === 0 && (
-                        <p className="text-xs text-gray-400 text-center py-6">Aún no hay ventas en este período.</p>
+                        <p className="text-xs text-zinc-400 text-center py-6">Aún no hay ventas en este período.</p>
                       )}
                     </div>
                     {resumenReporte.productos.length > 0 && (
-                      <p className="text-[11px] text-gray-500 mt-4 pt-3 border-t border-gray-200">
+                      <p className="text-[11px] text-zinc-500 mt-4 pt-3 border-t border-zinc-200">
                         Total del período: <b>{resumenReporte.totalUnidades}</b> unidades · <b>{soles(resumenReporte.totalImporte)}</b> en {resumenReporte.productos.length} productos distintos
                       </p>
                     )}
@@ -1841,16 +2007,16 @@ function App() {
                 )}
               </div>
 
-              <div className="border border-gray-200 p-5 rounded-2xl bg-gray-50">
-                <h3 className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
-                  <span>⚠️</span> Alertas de Stock Bajo (Menos de 5 unidades)
+              <div className="border border-zinc-200 p-5 rounded-xl bg-zinc-50">
+                <h3 className="text-sm font-bold text-zinc-700 mb-4 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" /> Alertas de Stock Bajo (Menos de 5 unidades)
                 </h3>
                 <div className="flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-1">
                   {listaProductosAdmin.filter(p => p.stock < 5).map(prod => (
                     <div key={prod.id} className="bg-white p-3 rounded-xl border border-red-100 flex justify-between items-center shadow-xs">
                       <div>
-                        <h4 className="font-bold text-gray-800 text-xs">{prod.nombre}</h4>
-                        <span className="text-[10px] text-gray-400">Categoría: {prod.tipo}</span>
+                        <h4 className="font-bold text-zinc-800 text-xs">{prod.nombre}</h4>
+                        <span className="text-[10px] text-zinc-400">Categoría: {prod.tipo}</span>
                       </div>
                       <span className="px-2.5 py-1 bg-red-100 text-red-700 font-bold text-xs rounded-full">
                         {prod.stock} unids.
@@ -1858,55 +2024,55 @@ function App() {
                     </div>
                   ))}
                   {listaProductosAdmin.filter(p => p.stock < 5).length === 0 && (
-                    <div className="text-center py-10 text-gray-400 text-xs">
-                      🎉 ¡Excelente! No hay productos con stock crítico en este momento.
+                    <div className="text-center py-10 text-zinc-400 text-xs">
+                      ¡Excelente! No hay productos con stock crítico en este momento.
                     </div>
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="border border-gray-200 p-5 rounded-2xl bg-gray-50 mt-6">
+            <div className="border border-zinc-200 p-5 rounded-xl bg-zinc-50 mt-6">
               <div className="flex flex-wrap justify-between items-start gap-2 mb-4">
                 <div>
-                  <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                    <span>🧊</span> Productos sin Rotación
-                    <span className="text-[10px] font-normal text-gray-400">({etiquetaRangoReporte})</span>
+                  <h3 className="text-sm font-bold text-zinc-700 flex items-center gap-2">
+                    <Snowflake className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" /> Productos sin Rotación
+                    <span className="text-[10px] font-normal text-zinc-400">({etiquetaRangoReporte})</span>
                   </h3>
-                  <p className="text-[11px] text-gray-500 mt-1">Tienen stock pero no se vendió ninguna unidad en el período.</p>
+                  <p className="text-[11px] text-zinc-500 mt-1">Tienen stock pero no se vendió ninguna unidad en el período.</p>
                 </div>
                 {!cargandoReporte && productosSinRotacion.length > 0 && (
                   <div className="text-right">
-                    <span className="text-xs font-extrabold text-indigo-700">{productosSinRotacion.length} productos</span>
-                    <span className="block text-[10px] text-gray-500">{soles(valorSinRotacion)} en stock (a precio de venta)</span>
+                    <span className="text-xs font-bold tracking-tight text-indigo-700">{productosSinRotacion.length} productos</span>
+                    <span className="block text-[10px] text-zinc-500">{soles(valorSinRotacion)} en stock (a precio de venta)</span>
                   </div>
                 )}
               </div>
 
               {cargandoReporte ? (
-                <p className="text-xs text-gray-400 text-center py-6">Calculando...</p>
+                <p className="text-xs text-zinc-400 text-center py-6">Calculando...</p>
               ) : productosSinRotacion.length === 0 ? (
-                <div className="text-center py-8 text-gray-400 text-xs">
-                  🎉 Todo el inventario con stock tuvo salida en este período.
+                <div className="text-center py-8 text-zinc-400 text-xs">
+                  Todo el inventario con stock tuvo salida en este período.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[320px] overflow-y-auto pr-1">
                   {productosSinRotacion.map(prod => (
-                    <div key={prod.id} className="bg-white p-3 rounded-xl border border-gray-100 flex justify-between items-center shadow-xs">
+                    <div key={prod.id} className="bg-white p-3 rounded-xl border border-zinc-100 flex justify-between items-center shadow-xs">
                       <div>
-                        <h4 className="font-bold text-gray-800 text-xs">{prod.nombre}</h4>
-                        <span className="text-[10px] text-gray-400">{prod.marca} | {prod.tipo}</span>
+                        <h4 className="font-bold text-zinc-800 text-xs">{prod.nombre}</h4>
+                        <span className="text-[10px] text-zinc-400">{prod.marca} | {prod.tipo}</span>
                       </div>
                       <div className="text-right">
                         <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-full">{prod.stock} unids.</span>
-                        <span className="block text-[10px] text-gray-400 mt-1">{soles(prod.valorStock)}</span>
+                        <span className="block text-[10px] text-zinc-400 mt-1">{soles(prod.valorStock)}</span>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
               {rangoReporte === 'hoy' && (
-                <p className="text-[11px] text-gray-400 mt-3">Con "Hoy" casi todo aparece sin rotación; usa 30 días o más para decidir reposiciones o promociones.</p>
+                <p className="text-[11px] text-zinc-400 mt-3">Con "Hoy" casi todo aparece sin rotación; usa 30 días o más para decidir reposiciones o promociones.</p>
               )}
             </div>
           </div>
@@ -1914,58 +2080,70 @@ function App() {
 
         {/* VISTA DE PRODUCTOS (SOLO ADMIN) */}
         {vistaAdmin === 'productos' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b border-gray-200 bg-gray-50 space-y-4">
+          <div className="bg-white rounded-xl shadow-sm border border-zinc-200 overflow-hidden">
+            <div className="p-6 border-b border-zinc-200 bg-zinc-50 space-y-4">
               <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-800">Inventario Global</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <h2 className="text-xl font-bold text-zinc-800">Inventario Global</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
                     {productosAdminFiltrados.length} de {listaProductosAdmin.length} productos
-                    {sinImagenCount > 0 && <> · <span className="text-amber-600 font-semibold">{sinImagenCount} sin imagen</span></>}
                   </p>
                 </div>
                 <div className="flex gap-4 justify-end items-center">
-                  <button onClick={() => setMostrarGestorListas(true)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg transition text-sm">
-                    ⚙️ Categorías y marcas
+                  <button onClick={() => setMostrarStockLocales(true)} className="bg-white border border-zinc-200 hover:bg-zinc-50 text-zinc-700 font-semibold py-2 px-4 rounded-lg transition text-sm">
+                    <Package className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Stock y traslados
                   </button>
-                  <button onClick={abrirModalCrear} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm shadow-sm">
+                  <button onClick={() => setMostrarGestorListas(true)} className="bg-white border border-zinc-200 hover:bg-zinc-50 text-zinc-700 font-semibold py-2 px-4 rounded-lg transition text-sm">
+                    <Settings2 className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Categorías y marcas
+                  </button>
+                  <button onClick={abrirModalCrear} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm shadow-sm">
                     + Registrar Nuevo Producto
                   </button>
-                  <button onClick={() => setVistaAdmin('dashboard')} className="text-gray-500 hover:text-gray-800 font-medium text-sm">← Volver</button>
+                  <button onClick={() => setVistaAdmin('dashboard')} className="text-zinc-500 hover:text-zinc-800 font-medium text-sm">← Volver</button>
                 </div>
               </div>
 
               <div className="flex flex-col lg:flex-row gap-3">
                 <div className="relative flex-1">
                   <input
-                    type="text" placeholder="🔍 Buscar por nombre, marca, apodo, código de barras o ficha técnica…"
+                    type="text" placeholder="Buscar por nombre, marca, apodo, código de barras o ficha técnica…"
                     value={busquedaAdmin} onChange={(e) => setBusquedaAdmin(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && productosAdminFiltrados.length === 1) abrirModalEditar(productosAdminFiltrados[0]) }}
-                    className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                    className="w-full pl-4 pr-10 py-2 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 bg-white"
                   />
                   {busquedaAdmin && (
-                    <button onClick={() => setBusquedaAdmin('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">✕</button>
+                    <button onClick={() => setBusquedaAdmin('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
                   )}
                 </div>
-                <select value={filtroTipoAdmin} onChange={(e) => setFiltroTipoAdmin(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
-                  {tiposAdmin.map(t => <option key={t} value={t}>{t === 'Todos' ? '📁 Todas las categorías' : t}</option>)}
+                <select value={filtroStockAdmin} onChange={(e) => setFiltroStockAdmin(e.target.value)} className="px-3 py-2 border border-zinc-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400">
+                  <option value="todos">Todo el stock</option>
+                  <option value="bajo">Stock bajo (menos de 5)</option>
+                  <option value="agotado">Agotado</option>
                 </select>
-                <select value={filtroImagen} onChange={(e) => setFiltroImagen(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="todos">🖼️ Con y sin imagen</option>
-                  <option value="con">✓ Con imagen</option>
-                  <option value="sin">📷 Sin imagen</option>
-                </select>
-                <select value={filtroStockAdmin} onChange={(e) => setFiltroStockAdmin(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="todos">📦 Todo el stock</option>
-                  <option value="bajo">⚠ Stock bajo (menos de 5)</option>
-                  <option value="agotado">⛔ Agotado</option>
-                </select>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-zinc-500 mr-1">Categoría:</span>
+                {tiposAdmin.map(t => {
+                  const activo = filtroTipoAdmin === t
+                  const n = t === 'Todos' ? listaProductosAdmin.length : (conteoTiposAdmin[t] || 0)
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setFiltroTipoAdmin(t)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${activo ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm' : 'bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-100'}`}
+                    >
+                      {t === 'Todos' ? 'Todas' : t} <span className={activo ? 'text-emerald-100' : 'text-zinc-400'}>({n})</span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
             <div className="overflow-x-auto max-h-[560px]">
               <table className="w-full text-left">
-                <thead className="bg-gray-50 text-gray-600 text-sm sticky top-0 z-10 shadow-sm">
+                <thead className="bg-zinc-50 text-zinc-600 text-sm sticky top-0 z-10 shadow-sm">
                   <tr>
                     <th className="p-4 font-semibold w-24">Imagen</th>
                     <th className="p-4 font-semibold">Producto</th>
@@ -1976,37 +2154,34 @@ function App() {
                     <th className="p-4 font-semibold text-center">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 text-sm">
+                <tbody className="divide-y divide-zinc-100 text-sm">
                   {productosAdminFiltrados.map((prod) => {
                     const f = fichas[prod.id]
                     return (
-                      <tr key={prod.id} className="hover:bg-gray-50 transition">
+                      <tr key={prod.id} className="hover:bg-zinc-50 transition">
                         <td className="p-3">
-                          <div className="flex flex-col items-start gap-1">
-                            <MiniFoto url={f?.imagen_url} nombre={prod.nombre} tam="w-14 h-14" onClick={() => setImagenVista({ url: f.imagen_url, nombre: prod.nombre })} />
-                            {!f?.imagen_url && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">Sin imagen</span>}
-                          </div>
+                          <MiniFoto url={f?.imagen_url} nombre={prod.nombre} tam="w-14 h-14" onClick={() => setImagenVista({ url: f.imagen_url, nombre: prod.nombre })} />
                         </td>
                         <td className="p-4">
-                          <p className="font-medium text-gray-800">{prod.nombre}</p>
-                          {f?.apodos && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{f.apodos}</p>}
+                          <p className="font-medium text-zinc-800">{prod.nombre}</p>
+                          {f?.apodos && <p className="text-xs text-zinc-400 mt-0.5 truncate max-w-xs">{f.apodos}</p>}
                         </td>
                         <td className="p-4 text-blue-600 font-semibold">{prod.marca}</td>
-                        <td className="p-4 text-gray-500">{prod.tipo}</td>
-                        <td className="p-4 font-bold text-green-700">S/ {prod.precio.toFixed(2)}</td>
+                        <td className="p-4 text-zinc-500">{prod.tipo}</td>
+                        <td className="p-4 font-bold text-emerald-700">S/ {prod.precio.toFixed(2)}</td>
                         <td className="p-4">
                           {prod.stock <= 0
                             ? <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-1 rounded-full">Agotado</span>
                             : prod.stock < 5
                               ? <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Bajo · {prod.stock}</span>
-                              : <span className="text-gray-700">{prod.stock} unids.</span>}
+                              : <span className="text-zinc-700">{prod.stock} unids.</span>}
                         </td>
                         <td className="p-4 text-center">
                           <button
                             onClick={() => abrirModalEditar(prod)}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold px-3 py-1.5 rounded-lg text-xs transition"
                           >
-                            ✏️ Editar
+                            <Pencil className="w-4 h-4 inline -mt-0.5 mr-1.5 text-zinc-500" />Editar
                           </button>
                         </td>
                       </tr>
@@ -2014,7 +2189,7 @@ function App() {
                   })}
                   {productosAdminFiltrados.length === 0 && (
                     <tr>
-                      <td colSpan="7" className="p-8 text-center text-gray-400">
+                      <td colSpan="7" className="p-8 text-center text-zinc-400">
                         No se encontraron productos con esos filtros.
                         {hayFiltrosAdmin && <button onClick={limpiarFiltrosAdmin} className="ml-2 text-blue-600 font-semibold underline">Limpiar filtros</button>}
                       </td>
@@ -2026,10 +2201,10 @@ function App() {
 
             {imagenVista && (
               <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setImagenVista(null)}>
-                <div className="bg-white rounded-2xl p-3 max-w-xl w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                  <img src={imagenVista.url} alt={imagenVista.nombre} className="w-full max-h-[70vh] object-contain rounded-xl bg-gray-50" />
-                  <p className="text-center text-sm font-semibold text-gray-800 mt-3">{imagenVista.nombre}</p>
-                  <button onClick={() => setImagenVista(null)} className="mt-2 w-full py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm font-bold text-gray-700">Cerrar</button>
+                <div className="bg-white rounded-xl p-3 max-w-xl w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
+                  <img src={imagenVista.url} alt={imagenVista.nombre} className="w-full max-h-[70vh] object-contain rounded-xl bg-zinc-50" />
+                  <p className="text-center text-sm font-semibold text-zinc-800 mt-3">{imagenVista.nombre}</p>
+                  <button onClick={() => setImagenVista(null)} className="mt-2 w-full py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-sm font-bold text-zinc-700">Cerrar</button>
                 </div>
               </div>
             )}
@@ -2038,14 +2213,14 @@ function App() {
 
         {/* VISTA DE USUARIOS */}
         {vistaAdmin === 'usuarios' && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-              <h2 className="text-xl font-bold text-gray-800">Lista de Empleados</h2>
+          <div className="bg-white rounded-xl shadow-sm border border-zinc-200 overflow-hidden">
+            <div className="p-6 border-b border-zinc-200 flex justify-between items-center bg-zinc-50">
+              <h2 className="text-xl font-bold text-zinc-800">Lista de Empleados</h2>
               <div className="flex gap-4">
-                <button onClick={() => setMostrarFormNuevo(!mostrarFormNuevo)} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition text-sm">
+                <button onClick={() => setMostrarFormNuevo(!mostrarFormNuevo)} className="bg-zinc-900 hover:bg-zinc-800 text-white font-semibold py-2 px-4 rounded-lg transition text-sm">
                   {mostrarFormNuevo ? 'Cancelar' : '+ Nuevo Empleado'}
                 </button>
-                <button onClick={() => setVistaAdmin('dashboard')} className="text-gray-500 hover:text-gray-800 font-medium text-sm">← Volver</button>
+                <button onClick={() => setVistaAdmin('dashboard')} className="text-zinc-500 hover:text-zinc-800 font-medium text-sm">← Volver</button>
               </div>
             </div>
 
@@ -2053,26 +2228,26 @@ function App() {
               <div className="p-6 bg-blue-50 border-b border-blue-100">
                 <form onSubmit={crearNuevoUsuario} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-gray-600 mb-1">Nombre Completo</label>
+                    <label className="block text-xs font-medium text-zinc-600 mb-1.5">Nombre Completo</label>
                     <input type="text" required value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} className="w-full px-3 py-2 border rounded-lg bg-white text-sm" placeholder="Ej. Ashly" />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-gray-600 mb-1">Correo Electrónico</label>
+                    <label className="block text-xs font-medium text-zinc-600 mb-1.5">Correo Electrónico</label>
                     <input type="email" required value={nuevoEmail} onChange={(e) => setNuevoEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg bg-white text-sm" placeholder="cajero@valkat.com" />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-600 mb-1">Rol</label>
+                    <label className="block text-xs font-medium text-zinc-600 mb-1.5">Rol</label>
                     <select value={nuevoRol} onChange={(e) => setNuevoRol(e.target.value)} className="w-full px-3 py-2 border rounded-lg bg-white text-sm">
                       <option value="cajero">Cajero</option>
                       <option value="admin">Administrador</option>
                     </select>
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-gray-600 mb-1">Contraseña Temporal</label>
+                    <label className="block text-xs font-medium text-zinc-600 mb-1.5">Contraseña Temporal</label>
                     <input type="password" required value={nuevoPasswordCrear} onChange={(e) => setNuevoPasswordCrear(e.target.value)} className="w-full px-3 py-2 border rounded-lg bg-white text-sm" placeholder="Min. 6 caracteres" />
                   </div>
                   <div className="md:col-span-3 flex justify-end">
-                    <button type="submit" disabled={cargando} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition text-sm">
+                    <button type="submit" disabled={cargando} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-6 rounded-lg transition text-sm">
                       {cargando ? 'Guardando...' : 'Guardar Empleado'}
                     </button>
                   </div>
@@ -2082,7 +2257,7 @@ function App() {
 
             <div className="overflow-x-auto">
               <table className="w-full text-left">
-                <thead className="bg-gray-50 text-gray-600 text-sm">
+                <thead className="bg-zinc-50 text-zinc-600 text-sm">
                   <tr>
                     <th className="p-4 font-semibold">Nombre Completo</th>
                     <th className="p-4 font-semibold">Correo</th>
@@ -2090,18 +2265,18 @@ function App() {
                     <th className="p-4 font-semibold">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 text-sm">
+                <tbody className="divide-y divide-zinc-100 text-sm">
                   {listaUsuarios.map((usuario) => (
-                    <tr key={usuario.id} className="hover:bg-gray-50 transition">
-                      <td className="p-4 font-medium text-gray-800">{usuario.nombre_completo}</td>
-                      <td className="p-4 text-gray-500">{usuario.email}</td>
+                    <tr key={usuario.id} className="hover:bg-zinc-50 transition">
+                      <td className="p-4 font-medium text-zinc-800">{usuario.nombre_completo}</td>
+                      <td className="p-4 text-zinc-500">{usuario.email}</td>
                       <td className="p-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${usuario.rol === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${usuario.rol === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>
                           {usuario.rol.toUpperCase()}
                         </span>
                       </td>
                       <td className="p-4">
-                        <button onClick={() => cambiarRolUsuario(usuario.id, usuario.rol)} className="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded transition">
+                        <button onClick={() => cambiarRolUsuario(usuario.id, usuario.rol)} className="text-sm bg-zinc-100 hover:bg-zinc-200 text-zinc-700 px-3 py-1 rounded transition">
                           Cambiar Rango
                         </button>
                       </td>
@@ -2111,6 +2286,17 @@ function App() {
               </table>
             </div>
           </div>
+        )}
+
+          </div>
+        </div>
+
+        {mostrarStockLocales && (
+          <StockLocales
+            supabase={supabase}
+            onCerrar={() => setMostrarStockLocales(false)}
+            onCambio={cargarProductos}
+          />
         )}
 
         {mostrarGestorListas && (
@@ -2123,18 +2309,18 @@ function App() {
 
         {/* MODAL DE PRODUCTO */}
         {mostrarModalProductoAdmin && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-lg border border-green-200 max-h-[90vh] overflow-y-auto">
-              <h3 className="text-lg font-bold text-gray-800 mb-1">
-                {modoEdicion ? '✏️ Editar Producto Existente' : '➕ Registrar Nuevo Producto'}
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-lg border border-emerald-200 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-bold text-zinc-800 mb-1">
+                {modoEdicion ? 'Editar producto existente' : 'Registrar nuevo producto'}
               </h3>
               <form onSubmit={guardarProductoAdmin} className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Nombre del Producto</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Nombre del Producto</label>
                   <input type="text" required placeholder="Ej. Cámara Domo 4K Hikvision" value={prodNombre} onChange={(e) => setProdNombre(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Marca</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Marca</label>
                   <select required value={prodMarca} onChange={(e) => setProdMarca(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm bg-white">
                     {(prodMarca && !listaMarcas.includes(prodMarca) ? [prodMarca, ...listaMarcas] : listaMarcas).map(m => (
                       <option key={m} value={m}>{m}</option>
@@ -2142,7 +2328,7 @@ function App() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Categoría (Tipo)</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Categoría (Tipo)</label>
                   <select value={prodTipo} onChange={(e) => setProdTipo(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm bg-white">
                     {(prodTipo && !listaCategorias.includes(prodTipo) ? [prodTipo, ...listaCategorias] : listaCategorias).map(c => (
                       <option key={c} value={c}>{c}</option>
@@ -2150,30 +2336,30 @@ function App() {
                   </select>
                 </div>
                 <div className="md:col-span-2 -mt-2 text-right">
-                  <button type="button" onClick={() => setMostrarGestorListas(true)} className="text-xs font-bold text-green-700 hover:underline">
+                  <button type="button" onClick={() => setMostrarGestorListas(true)} className="text-xs font-bold text-emerald-700 hover:underline">
                     ¿Falta una marca o categoría? Gestionar listas
                   </button>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Precio de Venta (S/)</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Precio de Venta (S/)</label>
                   <input type="number" step="0.10" required placeholder="0.00" value={prodPrecio} onChange={(e) => setProdPrecio(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Stock Actual</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Stock en tienda</label>
                   <input type="number" required placeholder="10" value={prodStock} onChange={(e) => setProdStock(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
                 </div>
                 <div className="md:col-span-2">
                   <SelectorImagen urlActual={prodImagenUrl} onArchivo={setProdImagenArchivo} />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Apodos y N.º de panel (separados por coma)</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Apodos y N.º de panel (separados por coma)</label>
                   <input type="text" placeholder="Ej. 5, robot, giratoria, interior" value={prodApodos} onChange={(e) => setProdApodos(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Código de barras (escanea con el lector o escribe)</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Código de barras (escanea con el lector o escribe)</label>
                   <div className="flex gap-2">
                     <input type="text" inputMode="numeric" placeholder="Ej. 6939554912345" value={prodCodigo} onChange={(e) => setProdCodigo(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
-                    <button type="button" onClick={() => setMostrarEscaner(true)} className="shrink-0 bg-gray-800 hover:bg-gray-900 text-white font-bold px-4 rounded-xl text-sm">Escanear</button>
+                    <button type="button" onClick={() => setMostrarEscaner(true)} className="shrink-0 bg-zinc-800 hover:bg-zinc-900 text-white font-bold px-4 rounded-xl text-sm">Escanear</button>
                   </div>
                   {mostrarEscaner && (
                     <EscanerCodigo
@@ -2186,8 +2372,8 @@ function App() {
                   <SpecsEditor key={prodIdEditando ?? 'nuevo'} inicial={prodSpecs} tipo={prodTipo} onChange={setProdSpecs} />
                 </div>
                 <div className="md:col-span-2 flex gap-3 mt-4">
-                  <button type="button" onClick={() => setMostrarModalProductoAdmin(false)} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-xl transition text-sm">Cancelar</button>
-                  <button type="submit" disabled={cargando} className="w-1/2 bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl transition text-sm shadow-md">Guardar</button>
+                  <button type="button" onClick={() => setMostrarModalProductoAdmin(false)} className="w-1/2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-2.5 rounded-xl transition text-sm">Cancelar</button>
+                  <button type="submit" disabled={cargando} className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl transition text-sm shadow-md">Guardar</button>
                 </div>
               </form>
             </div>
@@ -2200,55 +2386,64 @@ function App() {
   // --- VISTA DE CAJERO ---
   if (rol === 'cajero') {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
+      <div className="min-h-screen bg-zinc-50 p-4 lg:p-6">
         {capaGlobal}
-        <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
-          <div className="flex items-center gap-4">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 object-contain rounded" />
-            <h1 className="text-2xl font-bold text-green-700">Módulo de Caja - Valkat Store</h1>
+        <div className="flex justify-between items-center bg-white px-4 py-3 rounded-xl border border-zinc-200 mb-5">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain rounded-md" />
+            <div className="leading-tight">
+              <p className="text-sm font-semibold text-zinc-900">Valkat Store</p>
+              <p className="text-[11px] text-zinc-500">Módulo de caja</p>
+            </div>
           </div>
-          <button onClick={cerrarSesion} className="bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2 rounded-lg font-medium transition text-sm">Cerrar Sesión</button>
+          <div className="flex items-center gap-2">
+            <TrasladosPorRecibir supabase={supabase} userId={session?.user?.id} onCambio={cargarProductos} />
+            {botonTema}
+              <button onClick={cerrarSesion} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 transition">
+              <LogOut className="w-4 h-4" /><span className="hidden sm:inline">Cerrar sesión</span>
+            </button>
+          </div>
         </div>
 
         {!turnoAbierto ? (
-          <div className="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-200 mt-10">
-            <h2 className="text-xl font-semibold text-gray-800 mb-2 text-center">Apertura de Turno de Caja</h2>
-            <p className="text-xs text-gray-500 mb-6 text-center">Ingresa el monto de sencillo con el que inicias el día.</p>
-            
+          <div className="max-w-sm mx-auto bg-white p-6 rounded-xl border border-zinc-200 shadow-sm mt-16">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700"><Wallet className="w-5 h-5" /></div>
+            <h2 className="mt-4 text-base font-semibold text-zinc-900">Apertura de turno</h2>
+            <p className="text-xs text-zinc-500 mt-1 mb-5">Ingresa el monto de sencillo con el que inicias el día.</p>
             <form onSubmit={abrirCajaTurno} className="flex flex-col gap-4">
               <div>
-                <label className="block text-gray-600 text-xs mb-1 font-bold">Monto Inicial (Sencillo)</label>
+                <label className="block text-xs font-medium text-zinc-600 mb-1.5">Monto inicial (sencillo)</label>
                 <div className="relative">
-                  <span className="absolute left-4 top-3 text-gray-500 font-bold">S/</span>
-                  <input 
-                    type="number" step="0.10" required 
-                    value={montoApertura} onChange={(e) => setMontoApertura(e.target.value)} 
-                    className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" 
-                    placeholder="0.00" 
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-sm font-medium">S/</span>
+                  <input
+                    type="number" step="0.10" required
+                    value={montoApertura} onChange={(e) => setMontoApertura(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition"
+                    placeholder="0.00"
                   />
                 </div>
               </div>
-              <button type="submit" disabled={cargando} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl transition shadow-md text-sm">
-                {cargando ? 'Abriendo caja...' : 'Abrir Caja y Empezar a Vender'}
+              <button type="submit" disabled={cargando} className="w-full bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-400 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm">
+                {cargando ? 'Abriendo caja...' : 'Abrir caja y empezar a vender'}
               </button>
             </form>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-5 items-start">
             
             {/* CATÁLOGO, BUSCADOR Y FILTROS */}
-            <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-              <div className="flex justify-between items-center border-b pb-4 mb-4">
-                <div>
-                  <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full">Caja Abierta</span>
-                  <p className="text-xs text-gray-500 mt-1">Sencillo inicial: <span className="font-bold text-gray-800">S/ {turnoAbierto.monto_apertura}</span></p>
+            <div className="bg-white p-5 rounded-xl border border-zinc-200">
+              <div className="flex flex-wrap justify-between items-center gap-3 border-b border-zinc-200 pb-4 mb-4">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Caja abierta</span>
+                  <p className="text-xs text-zinc-500">Sencillo inicial: <span className="font-semibold text-zinc-900">S/ {turnoAbierto.monto_apertura}</span></p>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => setMostrarModalRetiro(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition shadow-xs">
-                    💸 Retiro de Caja
+                  <button onClick={() => setMostrarModalRetiro(true)} className="inline-flex items-center gap-1.5 bg-white border border-zinc-200 hover:bg-zinc-50 text-zinc-700 text-xs font-medium px-3 py-2 rounded-lg transition">
+                    <ArrowDownToLine className="w-3.5 h-3.5" /> Retiro de caja
                   </button>
-                  <button onClick={() => setMostrarModalCierre(true)} className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition shadow-xs">
-                    🔒 Cerrar Caja / Cuadre
+                  <button onClick={() => setMostrarModalCierre(true)} className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-medium px-3 py-2 rounded-lg transition">
+                    <Lock className="w-3.5 h-3.5" /> Cerrar caja / Cuadre
                   </button>
                 </div>
               </div>
@@ -2257,57 +2452,58 @@ function App() {
               <div className="flex flex-col md:flex-row gap-3 mb-4">
                 <div className="relative flex-1">
                   <input 
-                    type="text" placeholder="🔍 Buscar por nombre, marca, apodo o escanear código de barras…" 
+                    type="text" placeholder="Buscar por nombre, marca, apodo o escanear código de barras…" 
                     value={busqueda} onChange={(e) => setBusqueda(e.target.value)} onKeyDown={alBuscarEnter}
-                    className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50"
+                    className="w-full pl-9 pr-10 py-2 border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 bg-white"
                   />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
                   {busqueda && (
-                    <button onClick={() => setBusqueda('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">✕</button>
+                    <button onClick={() => setBusqueda('')} aria-label="Limpiar búsqueda" className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
                   )}
                 </div>
                 <select 
                   value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50 font-medium text-gray-700"
+                  className="px-4 py-2 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 bg-zinc-50 font-medium text-zinc-700"
                 >
-                  <option value="Todos">📁 Todas las categorías</option>
+                  <option value="Todos">Todas las categorías</option>
                   {listaCategorias.map(c => (
-                    <option key={c} value={c}>{EMOJI_CATEGORIA[c] || '📁'} {c}</option>
+                    <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
               </div>
 
               {/* GRILLA DE PRODUCTOS */}
-              <p className="text-xs text-gray-400 mb-2">
+              <p className="text-xs text-zinc-400 mb-2">
                 {productosFiltrados.length} producto{productosFiltrados.length === 1 ? '' : 's'}
                 {busqueda.trim() && ' · Enter agrega el producto si hay una sola coincidencia'}
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[450px] overflow-y-auto pr-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[calc(100vh-330px)] min-h-[320px] overflow-y-auto pr-1 content-start">
                 {productosFiltrados.map(prod => (
-                  <div key={prod.id} className="border border-gray-200 p-3 rounded-xl flex flex-col justify-between hover:shadow-md transition">
+                  <div key={prod.id} className="border border-zinc-200 bg-white p-3 rounded-xl flex flex-col justify-between hover:border-zinc-200 hover:shadow-sm transition">
                     <div className="flex gap-3">
                       <MiniFoto url={fichas[prod.id]?.imagen_url} nombre={prod.nombre} tam="w-16 h-16" />
                       <div className="min-w-0 flex-1">
                         <div className="flex justify-between items-start gap-2">
                           <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{prod.marca}</span>
-                          <span className={`text-xs font-bold ${prod.stock < 5 ? 'text-red-500' : 'text-gray-400'}`}>Stock: {prod.stock}</span>
+                          <span className={`text-xs font-bold ${prod.stock < 5 ? 'text-red-500' : 'text-zinc-400'}`}>Stock: {prod.stock}</span>
                         </div>
-                        <h4 className="font-bold text-gray-800 mt-1.5 text-sm leading-snug">{prod.nombre}</h4>
-                        <p className="text-xs text-gray-500">{prod.tipo}</p>
+                        <h4 className="font-bold text-zinc-800 mt-1.5 text-sm leading-snug">{prod.nombre}</h4>
+                        <p className="text-xs text-zinc-500">{prod.tipo}</p>
                       </div>
                     </div>
                     <div className="flex justify-between items-center mt-3 pt-3 border-t">
-                      <span className="font-extrabold text-green-700">S/ {prod.precio.toFixed(2)}</span>
+                      <span className="font-bold text-zinc-900 tabular-nums">S/ {prod.precio.toFixed(2)}</span>
                       <button 
                         onClick={() => agregarAlCarrito(prod)}
-                        className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
                       >
-                        + Agregar
+                        <Plus className="w-3.5 h-3.5 inline -mt-0.5 mr-0.5" />Agregar
                       </button>
                     </div>
                   </div>
                 ))}
                 {productosFiltrados.length === 0 && (
-                  <div className="col-span-2 text-center py-10 text-gray-400 text-sm">
+                  <div className="col-span-2 text-center py-10 text-zinc-400 text-sm">
                     No se encontraron productos con ese filtro o búsqueda.
                   </div>
                 )}
@@ -2315,21 +2511,21 @@ function App() {
             </div>
 
             {/* CARRITO Y DESCUENTOS */}
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between">
+            <div className="bg-white p-5 rounded-xl border border-zinc-200 flex flex-col justify-between lg:sticky lg:top-4">
               <div>
-                <h3 className="text-md font-bold text-gray-800 border-b pb-3 mb-3">🛒 Venta Actual</h3>
+                <h3 className="text-sm font-semibold text-zinc-900 border-b border-zinc-200 pb-3 mb-3">Venta actual</h3>
 
                 {/* CLIENTE DE LA VENTA */}
                 <div className="mb-3">
                   <div className="flex justify-between items-center mb-1">
-                    <label className="text-xs font-bold text-gray-600">Cliente</label>
+                    <label className="text-xs font-bold text-zinc-600">Cliente</label>
                     <button type="button" onClick={() => setMostrarModalCliente(true)} className="text-xs font-bold text-blue-600 hover:text-blue-800">+ Nuevo cliente</button>
                   </div>
 
                   {clienteSeleccionado ? (
                     <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-blue-900 truncate">👤 {clienteSeleccionado.nombre}</p>
+                        <p className="text-sm font-bold text-zinc-900 truncate">{clienteSeleccionado.nombre}</p>
                         <p className="text-[11px] text-blue-700">
                           {clienteSeleccionado.documento ? `Doc: ${clienteSeleccionado.documento}` : 'Sin documento'}
                           {clienteSeleccionado.telefono ? ` · ${clienteSeleccionado.telefono}` : ''}
@@ -2346,19 +2542,19 @@ function App() {
                         onChange={(e) => { setBusquedaCliente(e.target.value); setMostrarListaClientes(true) }}
                         onFocus={() => setMostrarListaClientes(true)}
                         onBlur={() => setTimeout(() => setMostrarListaClientes(false), 150)}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400"
                       />
                       {mostrarListaClientes && (
-                        <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                        <div className="absolute z-20 mt-1 w-full bg-white border border-zinc-200 rounded-xl shadow-md max-h-48 overflow-y-auto">
                           {clientesFiltrados.map(c => (
                             <button
                               key={c.id}
                               type="button"
                               onMouseDown={() => { setClienteSeleccionado(c); setBusquedaCliente(''); setMostrarListaClientes(false) }}
-                              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-100 last:border-0"
+                              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-zinc-100 last:border-0"
                             >
-                              <p className="text-xs font-semibold text-gray-800">{c.nombre}</p>
-                              <p className="text-[11px] text-gray-500">{c.documento || 'Sin documento'}{c.telefono ? ` · ${c.telefono}` : ''}</p>
+                              <p className="text-xs font-semibold text-zinc-800">{c.nombre}</p>
+                              <p className="text-[11px] text-zinc-500">{c.documento || 'Sin documento'}{c.telefono ? ` · ${c.telefono}` : ''}</p>
                             </button>
                           ))}
                           {clientesFiltrados.length === 0 && (
@@ -2368,11 +2564,11 @@ function App() {
                               onMouseDown={() => registrarDesdeBusqueda(busquedaCliente.trim())}
                               className="w-full text-left px-3 py-3 hover:bg-blue-50"
                             >
-                              <p className="text-xs font-bold text-blue-700">🔎 Consultar {busquedaCliente.trim().length === 8 ? 'DNI' : 'RUC'} {busquedaCliente.trim()}</p>
-                              <p className="text-[11px] text-gray-500">No está registrado. Se buscará en RENIEC/SUNAT.</p>
+                              <p className="text-xs font-bold text-blue-700">Consultar {busquedaCliente.trim().length === 8 ? 'DNI' : 'RUC'} {busquedaCliente.trim()}</p>
+                              <p className="text-[11px] text-zinc-500">No está registrado. Se buscará en RENIEC/SUNAT.</p>
                             </button>
                           ) : (
-                            <p className="px-3 py-3 text-xs text-gray-400 text-center">Sin coincidencias. Usa "+ Nuevo cliente".</p>
+                            <p className="px-3 py-3 text-xs text-zinc-400 text-center">Sin coincidencias. Usa "+ Nuevo cliente".</p>
                           )
                           )}
                         </div>
@@ -2381,38 +2577,38 @@ function App() {
                   )}
                 </div>
                 
-                <div className="max-h-[230px] overflow-y-auto divide-y divide-gray-100 pr-1">
+                <div className="max-h-[230px] overflow-y-auto divide-y divide-zinc-100 pr-1">
                   {carrito.map(item => (
                     <div key={item.id} className="py-3 flex justify-between items-center">
                       <div>
-                        <h4 className="text-sm font-semibold text-gray-800">{item.nombre}</h4>
-                        <p className="text-xs text-gray-500">S/ {item.precio.toFixed(2)} c/u</p>
+                        <h4 className="text-sm font-semibold text-zinc-800">{item.nombre}</h4>
+                        <p className="text-xs text-zinc-500">S/ {item.precio.toFixed(2)} c/u</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => cambiarCantidad(item.id, -1)} className="w-6 h-6 bg-gray-100 rounded text-gray-600 font-bold hover:bg-gray-200">-</button>
+                        <button onClick={() => cambiarCantidad(item.id, -1)} className="w-6 h-6 bg-zinc-100 rounded text-zinc-600 font-bold hover:bg-zinc-200">-</button>
                         <span className="text-sm font-bold w-4 text-center">{item.cantidad}</span>
-                        <button onClick={() => cambiarCantidad(item.id, 1)} className="w-6 h-6 bg-gray-100 rounded text-gray-600 font-bold hover:bg-gray-200">+</button>
+                        <button onClick={() => cambiarCantidad(item.id, 1)} className="w-6 h-6 bg-zinc-100 rounded text-zinc-600 font-bold hover:bg-zinc-200">+</button>
                       </div>
                     </div>
                   ))}
                   {carrito.length === 0 && (
-                    <p className="text-center text-gray-400 py-8 text-sm">El carrito está vacío.</p>
+                    <p className="text-center text-zinc-400 py-8 text-sm">El carrito está vacío.</p>
                   )}
                 </div>
               </div>
 
               {/* CAMPO DE DESCUENTO */}
-              <div className="border-t pt-3 mt-2 bg-gray-50 p-3 rounded-xl">
-                <label className="block text-xs font-bold text-gray-600 mb-1">Descuento (S/)</label>
+              <div className="border-t pt-3 mt-2 bg-zinc-50 p-3 rounded-xl">
+                <label className="block text-xs font-medium text-zinc-600 mb-1.5">Descuento (S/)</label>
                 <input 
                   type="number" step="0.50" min="0" placeholder="0.00"
                   value={descuentoMonto} onChange={(e) => setDescuentoMonto(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-1.5 bg-white border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400"
                 />
               </div>
 
               <div className="border-t pt-3 mt-2">
-                <div className="flex justify-between items-center mb-1 text-xs text-gray-500">
+                <div className="flex justify-between items-center mb-1 text-xs text-zinc-500">
                   <span>Subtotal:</span>
                   <span>S/ {calcularSubtotal().toFixed(2)}</span>
                 </div>
@@ -2421,13 +2617,13 @@ function App() {
                   <span>- S/ {Number(descuentoMonto || 0).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center mb-4 border-t pt-2">
-                  <span className="font-bold text-gray-700">Total a Pagar:</span>
-                  <span className="text-xl font-extrabold text-green-700">S/ {calcularTotalFinal()}</span>
+                  <span className="font-bold text-zinc-700">Total a Pagar:</span>
+                  <span className="text-xl font-bold tracking-tight text-emerald-700">S/ {calcularTotalFinal()}</span>
                 </div>
                 <button 
                   disabled={carrito.length === 0 || cargando}
                   onClick={procesarCobro}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-bold py-3 rounded-xl transition shadow-md text-sm"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 text-white font-bold py-3 rounded-xl transition shadow-md text-sm"
                 >
                   {cargando ? 'Procesando...' : 'Cobrar Pedido'}
                 </button>
@@ -2439,23 +2635,23 @@ function App() {
 
         {/* MODAL DE SELECCIÓN DE MEDIO DE PAGO */}
         {mostrarModalCobro && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-green-200">
-              <div className="flex justify-center mb-2"><span className="text-3xl">💳</span></div>
-              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Seleccionar Medio de Pago</h3>
-              <p className="text-xs text-gray-500 text-center mb-4">Total a cobrar: <span className="font-extrabold text-green-700">S/ {calcularTotalFinal()}</span></p>
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md border border-emerald-200">
+              <div className="flex justify-center mb-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700"><CreditCard className="w-5 h-5" /></span></div>
+              <h3 className="text-lg font-bold text-zinc-800 text-center mb-1">Seleccionar Medio de Pago</h3>
+              <p className="text-xs text-zinc-500 text-center mb-4">Total a cobrar: <span className="font-bold tracking-tight text-emerald-700">S/ {calcularTotalFinal()}</span></p>
 
               <div className="flex flex-col gap-3 mb-4">
-                <label className="block text-xs font-bold text-gray-600">Método de Pago Principal</label>
+                <label className="block text-xs font-bold text-zinc-600">Método de Pago Principal</label>
                 <div className="grid grid-cols-2 gap-2">
                   {['Efectivo', 'Yape / Plin', 'Tarjeta POS', 'Mixto'].map(metodo => (
                     <button
                       key={metodo}
                       type="button"
                       onClick={() => setMetodoPago(metodo)}
-                      className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition ${metodoPago === metodo ? 'bg-green-600 text-white border-green-600 shadow-sm' : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'}`}
+                      className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition ${metodoPago === metodo ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-zinc-50 text-zinc-700 border-zinc-200 hover:bg-zinc-100'}`}
                     >
-                      {metodo === 'Mixto' ? '🔀 Pago Mixto' : metodo}
+                      {metodo === 'Mixto' ? 'Pago mixto' : metodo}
                     </button>
                   ))}
                 </div>
@@ -2463,29 +2659,29 @@ function App() {
 
               {metodoPago === 'Mixto' && (
                 <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl mb-4 flex flex-col gap-3">
-                  <span className="text-xs font-bold text-blue-900">Desglose de Pago Mixto</span>
+                  <span className="text-xs font-bold text-zinc-900">Desglose de Pago Mixto</span>
                   <div>
-                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Monto en Efectivo (S/)</label>
+                    <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Monto en Efectivo (S/)</label>
                     <input 
                       type="number" step="0.10" placeholder="0.00" 
                       value={montoEfectivoMixto} onChange={(e) => setMontoEfectivoMixto(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs"
+                      className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Monto en Yape / Plin (S/)</label>
+                    <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Monto en Yape / Plin (S/)</label>
                     <input 
                       type="number" step="0.10" placeholder="0.00" 
                       value={montoYapeMixto} onChange={(e) => setMontoYapeMixto(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs"
+                      className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs"
                     />
                   </div>
                 </div>
               )}
 
               <div className="flex gap-3 mt-4">
-                <button type="button" onClick={() => setMostrarModalCobro(false)} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Cancelar</button>
-                <button type="button" disabled={cargando} onClick={finalizarVentaConPago} className="w-1/2 bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl text-sm shadow-md">
+                <button type="button" onClick={() => setMostrarModalCobro(false)} className="w-1/2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-2.5 rounded-xl text-sm">Cancelar</button>
+                <button type="button" disabled={cargando} onClick={finalizarVentaConPago} className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-sm shadow-md">
                   {cargando ? 'Registrando...' : 'Confirmar Cobro'}
                 </button>
               </div>
@@ -2495,19 +2691,19 @@ function App() {
 
         {/* MODAL NUEVO CLIENTE */}
         {mostrarModalCliente && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-blue-200">
-              <div className="flex justify-center mb-2"><span className="text-3xl">👤</span></div>
-              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Registrar Cliente</h3>
-              <p className="text-xs text-gray-500 text-center mb-4">Se asignará automáticamente a la venta actual.</p>
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md border border-blue-200">
+              <div className="flex justify-center mb-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700"><UserRound className="w-5 h-5" /></span></div>
+              <h3 className="text-lg font-bold text-zinc-800 text-center mb-1">Registrar Cliente</h3>
+              <p className="text-xs text-zinc-500 text-center mb-4">Se asignará automáticamente a la venta actual.</p>
 
               <form onSubmit={guardarCliente} className="flex flex-col gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Nombre o Razón Social *</label>
-                  <input type="text" required value={clienteNombre} onChange={(e) => setClienteNombre(e.target.value)} placeholder="Ej: Juan Pérez" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm" />
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Nombre o Razón Social *</label>
+                  <input type="text" required value={clienteNombre} onChange={(e) => setClienteNombre(e.target.value)} placeholder="Ej: Juan Pérez" className="w-full px-4 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">DNI / RUC (opcional)</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">DNI / RUC (opcional)</label>
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -2516,28 +2712,28 @@ function App() {
                       onChange={(e) => { setClienteDocumento(e.target.value); setDatosConsultados(false) }}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); consultarDocumento() } }}
                       placeholder="DNI (8 dígitos) o RUC (11)"
-                      className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400"
+                      className="flex-1 px-4 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-sm text-zinc-900 placeholder-zinc-400"
                     />
                     <button
                       type="button"
                       onClick={() => consultarDocumento()}
                       disabled={consultandoDocumento}
-                      className="px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-bold rounded-xl whitespace-nowrap transition"
+                      className="px-3 bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-300 text-white text-xs font-bold rounded-xl whitespace-nowrap transition"
                     >
-                      {consultandoDocumento ? 'Consultando...' : '🔎 Consultar'}
+                      {consultandoDocumento ? 'Consultando...' : 'Consultar'}
                     </button>
                   </div>
-                  <p className={`text-[11px] mt-1 ${datosConsultados ? 'text-green-600 font-semibold' : 'text-gray-400'}`}>
-                    {datosConsultados ? '✔ Datos obtenidos de RENIEC/SUNAT. Puedes corregirlos si hace falta.' : 'Escribe el documento y pulsa Consultar para traer el nombre automáticamente.'}
+                  <p className={`text-[11px] mt-1 ${datosConsultados ? 'text-emerald-600 font-semibold' : 'text-zinc-400'}`}>
+                    {datosConsultados ? 'Datos obtenidos de RENIEC/SUNAT. Puedes corregirlos si hace falta.' : 'Escribe el documento y pulsa Consultar para traer el nombre automáticamente.'}
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Teléfono (opcional)</label>
-                  <input type="tel" value={clienteTelefono} onChange={(e) => setClienteTelefono(e.target.value)} placeholder="Celular" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm" />
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Teléfono (opcional)</label>
+                  <input type="tel" value={clienteTelefono} onChange={(e) => setClienteTelefono(e.target.value)} placeholder="Celular" className="w-full px-4 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-sm" />
                 </div>
                 <div className="flex gap-3 mt-2">
-                  <button type="button" onClick={cerrarModalCliente} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Cancelar</button>
-                  <button type="submit" disabled={cargando} className="w-1/2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-sm shadow-md">
+                  <button type="button" onClick={cerrarModalCliente} className="w-1/2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-2.5 rounded-xl text-sm">Cancelar</button>
+                  <button type="submit" disabled={cargando} className="w-1/2 bg-zinc-900 hover:bg-zinc-800 text-white font-bold py-2.5 rounded-xl text-sm shadow-md">
                     {cargando ? 'Guardando...' : 'Guardar y Usar'}
                   </button>
                 </div>
@@ -2548,38 +2744,38 @@ function App() {
 
         {/* MODAL DE CUADRE Y CIERRE DE CAJA */}
         {mostrarModalCierre && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-yellow-300">
-              <div className="flex justify-center mb-2"><span className="text-3xl">🧮</span></div>
-              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Cuadre y Cierre de Turno</h3>
-              <p className="text-xs text-gray-500 text-center mb-4">Cuenta el efectivo físico en caja e ingrésalo junto a tu contraseña.</p>
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md border border-amber-300">
+              <div className="flex justify-center mb-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700"><Calculator className="w-5 h-5" /></span></div>
+              <h3 className="text-lg font-bold text-zinc-800 text-center mb-1">Cuadre y Cierre de Turno</h3>
+              <p className="text-xs text-zinc-500 text-center mb-4">Cuenta el efectivo físico en caja e ingrésalo junto a tu contraseña.</p>
 
               <form onSubmit={confirmarCierreCaja} className="flex flex-col gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Efectivo Real en Caja (S/)</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Efectivo Real en Caja (S/)</label>
                   <div className="relative">
-                    <span className="absolute left-4 top-2.5 text-gray-500 font-bold text-sm">S/</span>
+                    <span className="absolute left-4 top-2.5 text-zinc-500 font-bold text-sm">S/</span>
                     <input 
                       type="number" step="0.10" required 
                       placeholder="0.00" value={efectivoRealCaja} onChange={(e) => setEfectivoRealCaja(e.target.value)} 
-                      className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm" 
+                      className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-sm" 
                     />
                   </div>
-                  <span className="text-[11px] text-gray-400 mt-1 block">Sencillo inicial registrado: S/ {turnoAbierto?.monto_apertura}</span>
+                  <span className="text-[11px] text-zinc-400 mt-1 block">Sencillo inicial registrado: S/ {turnoAbierto?.monto_apertura}</span>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Tu Contraseña de Autorización</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Tu Contraseña de Autorización</label>
                   <input 
                     type="password" required 
                     placeholder="Contraseña actual" value={passwordCierre} onChange={(e) => setPasswordCierre(e.target.value)} 
-                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm" 
+                    className="w-full px-4 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-sm" 
                   />
                 </div>
 
                 <div className="flex gap-3 mt-2">
-                  <button type="button" onClick={() => { setMostrarModalCierre(false); setPasswordCierre(''); }} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-xl text-sm">Cancelar</button>
-                  <button type="submit" disabled={cargando} className="w-1/2 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2.5 rounded-xl text-sm shadow-md">
+                  <button type="button" onClick={() => { setMostrarModalCierre(false); setPasswordCierre(''); }} className="w-1/2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-2.5 rounded-xl text-sm">Cancelar</button>
+                  <button type="submit" disabled={cargando} className="w-1/2 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 rounded-xl text-sm shadow-md">
                     {cargando ? 'Calculando y cerrando...' : 'Confirmar Cierre'}
                   </button>
                 </div>
@@ -2590,19 +2786,19 @@ function App() {
 
         {/* MODAL RETIRO DE CAJA (AUTORIZADO POR UN ADMIN) */}
         {mostrarModalRetiro && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-indigo-200">
-              <div className="flex justify-center mb-2"><span className="text-3xl">💸</span></div>
-              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Retiro de Caja</h3>
-              <p className="text-xs text-gray-500 text-center mb-5">Un Administrador debe autorizar el retiro con sus credenciales.</p>
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md border border-indigo-200">
+              <div className="flex justify-center mb-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700"><ArrowDownToLine className="w-5 h-5" /></span></div>
+              <h3 className="text-lg font-bold text-zinc-800 text-center mb-1">Retiro de Caja</h3>
+              <p className="text-xs text-zinc-500 text-center mb-5">Un Administrador debe autorizar el retiro con sus credenciales.</p>
 
               <form onSubmit={registrarRetiroCajero} autoComplete="off" className="flex flex-col gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Monto a retirar (S/)</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Monto a retirar (S/)</label>
                   <input type="number" step="0.01" min="0.01" required autoComplete="off" placeholder="0.00" value={retiroMonto} onChange={(e) => setRetiroMonto(e.target.value)} className={claseInputModal} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Motivo</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Motivo</label>
                   <input type="text" required autoComplete="off" placeholder="Ej: Depósito al banco, pago a proveedor" value={retiroMotivo} onChange={(e) => setRetiroMotivo(e.target.value)} className={claseInputModal} />
                 </div>
 
@@ -2613,8 +2809,8 @@ function App() {
                 </div>
 
                 <div className="flex gap-3 mt-2">
-                  <button type="button" onClick={cerrarModalesRetiro} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
-                  <button type="submit" disabled={cargando} className="w-1/2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-sm shadow-md">
+                  <button type="button" onClick={cerrarModalesRetiro} className="w-1/2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
+                  <button type="submit" disabled={cargando} className="w-1/2 bg-zinc-900 hover:bg-zinc-800 text-white font-bold py-3 rounded-xl text-sm shadow-md">
                     {cargando ? 'Validando...' : 'Autorizar retiro'}
                   </button>
                 </div>
@@ -2625,23 +2821,23 @@ function App() {
 
         {/* MODAL DE DESCUENTO ALTO */}
         {mostrarModalDescuento && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-red-300">
-              <div className="flex justify-center mb-2"><span className="text-3xl">🛡️</span></div>
-              <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Autorización Requerida</h3>
-              <p className="text-xs text-gray-500 text-center mb-6">El descuento supera los S/ 20.00. Un Administrador debe ingresar sus datos.</p>
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-xl shadow-xl w-full max-w-md border border-red-300">
+              <div className="flex justify-center mb-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700"><ShieldCheck className="w-5 h-5" /></span></div>
+              <h3 className="text-lg font-bold text-zinc-800 text-center mb-1">Autorización Requerida</h3>
+              <p className="text-xs text-zinc-500 text-center mb-6">El descuento supera los S/ 20.00. Un Administrador debe ingresar sus datos.</p>
 
               <form onSubmit={autorizarDescuentoAlto} autoComplete="off" className="flex flex-col gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Correo del Administrador</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Correo del Administrador</label>
                   <input type="email" name="admin-descuento-correo" autoComplete="off" data-lpignore="true" data-1p-ignore readOnly onFocus={(e) => e.target.removeAttribute('readonly')} required placeholder="Ingresa el correo del administrador" value={emailAdminDesc} onChange={(e) => setEmailAdminDesc(e.target.value)} className={claseInputModal} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Contraseña del Administrador</label>
+                  <label className="block text-xs font-medium text-zinc-600 mb-1.5">Contraseña del Administrador</label>
                   <input type="password" name="admin-descuento-clave" autoComplete="new-password" data-lpignore="true" data-1p-ignore readOnly onFocus={(e) => e.target.removeAttribute('readonly')} required placeholder="Ingresa la contraseña del administrador" value={passwordAdminDesc} onChange={(e) => setPasswordAdminDesc(e.target.value)} className={claseInputModal} />
                 </div>
                 <div className="flex gap-3 mt-2">
-                  <button type="button" onClick={() => { setMostrarModalDescuento(false); setEmailAdminDesc(''); setPasswordAdminDesc(''); }} className="w-1/2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
+                  <button type="button" onClick={() => { setMostrarModalDescuento(false); setEmailAdminDesc(''); setPasswordAdminDesc(''); }} className="w-1/2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold py-3 rounded-xl text-sm">Cancelar</button>
                   <button type="submit" disabled={cargando} className="w-1/2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm shadow-md">Autorizar</button>
                 </div>
               </form>

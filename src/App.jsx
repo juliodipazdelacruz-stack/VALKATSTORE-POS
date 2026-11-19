@@ -7,6 +7,8 @@ import SelectorImagen, { subirImagen } from './SelectorImagen'
 import AdminWeb from './AdminWeb'
 import AdminCuentas from './AdminCuentas'
 import GestorListas from './GestorListas'
+import StockLocales from './StockLocales'
+import TrasladosPorRecibir from './TrasladosPorRecibir'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -272,6 +274,7 @@ function App() {
   const [listaCategorias, setListaCategorias] = useState([])
   const [listaMarcas, setListaMarcas] = useState([])
   const [mostrarGestorListas, setMostrarGestorListas] = useState(false)
+  const [mostrarStockLocales, setMostrarStockLocales] = useState(false)
 
   // Estados para Modal de Crear / Editar Producto (Admin)
   const [mostrarModalProductoAdmin, setMostrarModalProductoAdmin] = useState(false)
@@ -1068,47 +1071,22 @@ function App() {
     setCargando(true)
 
     try {
-      // 1. Insertar la venta principal
-      const { data: ventaData, error: ventaError } = await supabase
-        .from('ventas')
-        .insert([{
-          caja_turno_id: turnoAbierto.id,
-          usuario_id: session.user.id,
-          cliente_id: clienteSeleccionado?.id || null,
-          total: totalPagar,
-          monto_efectivo: efectivoVenta,
-          medio_pago: metodoPago
-        }])
-        .select()
-        .single()
+      // Venta + detalle + descuento de stock en UNA sola operación en la base:
+      // si algo falla (por ejemplo, stock insuficiente) no queda nada a medias.
+      const { error: ventaError } = await supabase.rpc('registrar_venta', {
+        p_turno_id: turnoAbierto.id,
+        p_cliente_id: clienteSeleccionado?.id || null,
+        p_total: totalPagar,
+        p_monto_efectivo: efectivoVenta,
+        p_medio_pago: metodoPago,
+        p_items: carrito.map(item => ({
+          producto_id: item.id,
+          cantidad: item.cantidad,
+          precio: item.precio
+        }))
+      })
 
       if (ventaError) throw ventaError
-
-      // 2. Insertar cada detalle de venta y restar stock en la tabla productos
-      for (const item of carrito) {
-        const subtotalItem = item.precio * item.cantidad
-
-        const { error: detalleError } = await supabase
-          .from('detalle_ventas')
-          .insert([{
-            venta_id: ventaData.id,
-            producto_id: item.id,
-            cantidad: item.cantidad,
-            precio_unitario: item.precio,
-            subtotal: subtotalItem
-          }])
-
-        if (detalleError) throw detalleError
-
-        // Actualizar el stock restando la cantidad vendida
-        const nuevoStock = item.stock - item.cantidad
-        const { error: stockError } = await supabase
-          .from('productos')
-          .update({ stock: nuevoStock })
-          .eq('id', item.id)
-
-        if (stockError) throw stockError
-      }
 
       notificar(
         `Venta de S/ ${totalPagar.toFixed(2)} cobrada (${metodoPago}) · ${clienteSeleccionado ? clienteSeleccionado.nombre : 'Consumidor final'}`,
@@ -1925,6 +1903,9 @@ function App() {
                   </p>
                 </div>
                 <div className="flex gap-4 justify-end items-center">
+                  <button onClick={() => setMostrarStockLocales(true)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg transition text-sm">
+                    📦 Stock y traslados
+                  </button>
                   <button onClick={() => setMostrarGestorListas(true)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg transition text-sm">
                     ⚙️ Categorías y marcas
                   </button>
@@ -2113,6 +2094,14 @@ function App() {
           </div>
         )}
 
+        {mostrarStockLocales && (
+          <StockLocales
+            supabase={supabase}
+            onCerrar={() => setMostrarStockLocales(false)}
+            onCambio={cargarProductos}
+          />
+        )}
+
         {mostrarGestorListas && (
           <GestorListas
             supabase={supabase}
@@ -2159,7 +2148,7 @@ function App() {
                   <input type="number" step="0.10" required placeholder="0.00" value={prodPrecio} onChange={(e) => setProdPrecio(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Stock Actual</label>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Stock en tienda</label>
                   <input type="number" required placeholder="10" value={prodStock} onChange={(e) => setProdStock(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
                 </div>
                 <div className="md:col-span-2">
@@ -2207,7 +2196,10 @@ function App() {
             <img src="/logo.png" alt="Logo" className="w-10 h-10 object-contain rounded" />
             <h1 className="text-2xl font-bold text-green-700">Módulo de Caja - Valkat Store</h1>
           </div>
-          <button onClick={cerrarSesion} className="bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2 rounded-lg font-medium transition text-sm">Cerrar Sesión</button>
+          <div className="flex items-center gap-2">
+            <TrasladosPorRecibir supabase={supabase} userId={session?.user?.id} onCambio={cargarProductos} />
+            <button onClick={cerrarSesion} className="bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2 rounded-lg font-medium transition text-sm">Cerrar Sesión</button>
+          </div>
         </div>
 
         {!turnoAbierto ? (

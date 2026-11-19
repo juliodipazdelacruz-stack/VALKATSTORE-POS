@@ -14,6 +14,8 @@ const PLANTILLAS = {
   'Networking': ['Puertos', 'Velocidad', 'Alcance'],
   'Accesorios': ['Compatible con', 'Material'],
   'Soportes y Paneles': ['Compatible con', 'Material'],
+  // Plantilla de respaldo: sirve para cualquier producto, tenga o no categoría con plantilla propia
+  'General': ['Compatible con', 'Material', 'Capacidad', 'Conectividad', 'Alimentación', 'Garantía'],
 }
 
 let contador = 0
@@ -36,10 +38,13 @@ const filasAObjeto = (filas) =>
 
 /* ---------- Componente ----------
    inicial  : objeto JSONB actual (se lee al montar)
-   tipo     : categoría seleccionada, para ofrecer la plantilla
+   tipo     : categoría seleccionada; solo sugiere qué plantilla viene marcada,
+              la carga de plantilla ya NO depende de ella
    onChange : recibe el objeto listo para guardar en `especificaciones`   */
 export default function SpecsEditor({ inicial, tipo, onChange }) {
   const [filas, setFilas] = useState(() => objetoAFilas(inicial))
+  const [elegida, setElegida] = useState(null) // plantilla escogida a mano (null = seguir la categoría)
+  const activa = elegida ?? (PLANTILLAS[tipo] ? tipo : 'General')
 
   const actualizar = (nuevas) => { setFilas(nuevas); onChange(filasAObjeto(nuevas)) }
   const editar = (id, campo, texto) =>
@@ -51,7 +56,7 @@ export default function SpecsEditor({ inicial, tipo, onChange }) {
 
   const cargarPlantilla = () => {
     const existentes = new Set(filas.map((f) => f.clave.trim().toLowerCase()))
-    const nuevas = (PLANTILLAS[tipo] ?? [])
+    const nuevas = (PLANTILLAS[activa] ?? [])
       .filter((k) => !existentes.has(k.toLowerCase()))
       .map((k) => fila(k, ''))
     const base = filas.filter((f) => f.clave.trim() || f.valor.trim())
@@ -64,12 +69,20 @@ export default function SpecsEditor({ inicial, tipo, onChange }) {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-bold text-gray-600">Ficha técnica</span>
-        {PLANTILLAS[tipo] && (
-          <button type="button" onClick={cargarPlantilla}
-            className="text-xs font-bold text-green-700 hover:underline">
-            Cargar plantilla de {tipo}
-          </button>
-        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-2">
+        <label className="text-xs font-bold text-green-800" htmlFor="plantilla-ficha">Plantilla:</label>
+        <select id="plantilla-ficha" value={activa} onChange={(e) => setElegida(e.target.value)}
+          className="flex-1 min-w-[10rem] px-2 py-1.5 border border-green-200 rounded-lg text-xs bg-white">
+          {Object.keys(PLANTILLAS).map((n) => (
+            <option key={n} value={n}>{n === 'General' ? 'General (cualquier producto)' : n}</option>
+          ))}
+        </select>
+        <button type="button" onClick={cargarPlantilla}
+          className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold">
+          Cargar plantilla
+        </button>
       </div>
 
       {filas.map((f) => (
